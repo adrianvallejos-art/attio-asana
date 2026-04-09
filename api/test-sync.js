@@ -1,0 +1,129 @@
+import { createClient } from '@supabase/supabase-js';
+import { getProject, getProjectStatusUpdates } from './_asanaHelper.js';
+import { getAttioRecord, createAttioNote } from './_attioHelper.js';
+
+/**
+ * POST /api/test-sync
+ *
+ * Runs a dry-run or live test of the full sync cycle:
+ *   1. Fetches Asana project data
+ *   2. Fetches Attio Onboarding record
+ *   3. Optionally creates a test Note in Attio
+ *
+ * Body:
+ *   asana_project_gid — Asana project GID (required)
+ *   attio_record_id   — Attio Onboarding record ID (required)
+ *   dry_run           — true (default) = don't write to Attio, false = create real note
+ */
+export default async function handler(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const { asana_project_gid, attio_record_id, dry_run = true } = req.body;
+
+  if (!asana_project_gid || !attio_record_id) {
+    return res.status(400).json({ error: 'asana_project_gid and attio_record_id are required' });
+  }
+
+  const ONBOARDING_SLUG = process.env.ATTIO_ONBOARDING_SLUG || 'onboarding';
+  const results = { asana: null, attio: null, note: null, mapping_check: null };
+
+  // ── 1. Test Asana fetch ─────────────────────────────────────────
+  try {
+    const project = await getProject(asana_project_gid);
+    results.asana = {
+      status: 'ok',
+      project_name: project.name,
+      owner: project.owner?.name || null,
+      custom_fields: project.custom_fields?.map((f) => ({
+        name: f.name,
+        value: f.text_value || f.display_value || f.number_value,
+      })),
+    };
+
+    // Try to fetch status updates
+    try {
+      const updates = await getProjectStatusUpdates(asana_project_gid, { limit: 3 });
+      results.asana.recent_updates = updates?.map((u) => ({
+        title: u.title,
+        color: u.color,
+        created_at: u.created_at,
+      }));
+    } catch (e) {
+      results.asana.recent_updates_error = e.message;
+    }
+  } catch (e) {
+    results.asana = { status: 'error', message: e.message };
+  }
+
+  // ── 2. Test Attio fetch ─────────────────────────────────────────
+  try {
+    const record = await getAttioRecord(ONBOARDING_SLUG, attio_record_id);
+    const values = record?.data?.values || {};
+
+    // Extract a few key fields for display
+    const summary = {};
+    for (const [key, val] of Object.entries(values)) {
+      if (Array.isArray(val) && val.length > 0) {
+        const first = val[0];
+        summary[key] = first.value || first.option || first.status?.title || first.email_address || '(complex)';
+      }
+    }
+
+    results.attio = {
+      status: 'ok',
+      record_id: attio_record_id,
+      object: ONBOARDING_SLUG,
+      fields_count: Object.keys(values).length,
+      sample_fields: summary,
+    };
+  } catch (e) {
+    results.attio = { status: 'error', message: e.message };
+  }
+
+  // ── 3. Check mapping in Supabase ────────────────────────────────
+  try {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+    const { data: mapping } = await supabase
+      .from('onboarding_mapping')
+      .select('*')
+      .eq('asana_project_gid', asana_project_gid)
+      .eq('attio_record_id', attio_record_id)
+      .single();
+
+    results.mapping_check = mapping
+      ? { status: 'ok', active: mapping.active, team: mapping.team }
+      : { status: 'not_found', hint: 'Use POST /api/register-webhook to create the mapping' };
+  } catch (e) {
+    results.mapping_check = { status: 'error', message: e.message };
+  }
+
+  // ── 4. Create test note (if not dry_run) ────────────────────────
+  if (!dry_run && results.asana?.status === 'ok' && results.attio?.status === 'ok') {
+    try {
+      const note = await createAttioNote(attio_record_id, ONBOARDING_SLUG, {
+        title: `[TEST] Sync validation — ${results.asana.project_name}`,
+        content: [
+          `Test de conexión Asana → Attio`,
+          `Fecha: ${new Date().toISOString()}`,
+          `Proyecto Asana: ${results.asana.project_name} (${asana_project_gid})`,
+          `Record Attio: ${attio_record_id}`,
+          '',
+          'Esta nota fue creada automáticamente para validar la integración.',
+        ].join('\n'),
+        format: 'plaintext',
+      });
+
+      results.note = { status: 'created', note_id: note?.data?.id?.note_id };
+    } catch (e) {
+      results.note = { status: 'error', message: e.message };
+    }
+  } else if (dry_run) {
+    results.note = { status: 'skipped', reason: 'dry_run=true (send dry_run:false to create a real note)' };
+  }
+
+  // ── Overall ─────────────────────────────────────────────────────
+  const allOk = results.asana?.status === 'ok' && results.attio?.status === 'ok';
+  results.overall = allOk ? 'ready' : 'has_errors';
+
+  return res.status(allOk ? 200 : 503).json(results);
+}
