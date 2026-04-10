@@ -167,47 +167,52 @@ async function resolveAsanaUrls(text) {
   const userPattern = /https:\/\/app\.asana\.com\/0\/profile\/(\d+)/g;
 
   const taskGids = [...new Set([...text.matchAll(taskPattern)].map((m) => m[1]))];
-  const userGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
+  const profileGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
 
-  if (taskGids.length === 0 && userGids.length === 0) return text;
+  if (taskGids.length === 0 && profileGids.length === 0) return text;
 
-  const [taskNames, userNames] = await Promise.all([
-    fetchAsanaNames(taskGids, 'tasks', token),
-    fetchAsanaNames(userGids, 'users', token),
-  ]);
+  const taskNames = {};
+  const profileNames = {};
+
+  // Fetch tasks + collect people from assignee/completed_by/followers
+  await Promise.all(taskGids.map(async (gid) => {
+    try {
+      const r = await fetch(
+        `https://app.asana.com/api/1.0/tasks/${gid}?opt_fields=name,assignee.name,assignee.email,completed_by.name,completed_by.email,followers.name,followers.email`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) return;
+      const json = await r.json();
+      const data = json.data;
+      if (data?.name) taskNames[gid] = data.name;
+      for (const person of [data?.assignee, data?.completed_by, ...(data?.followers || [])]) {
+        if (person?.gid && person?.name) profileNames[person.gid] = person.name;
+      }
+    } catch { /* skip */ }
+  }));
+
+  // Try direct user lookup for unresolved profile GIDs
+  const unresolved = profileGids.filter((g) => !profileNames[g]);
+  await Promise.all(unresolved.map(async (gid) => {
+    try {
+      const r = await fetch(
+        `https://app.asana.com/api/1.0/users/${gid}?opt_fields=name,email`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (!r.ok) return;
+      const json = await r.json();
+      const data = json.data;
+      if (data?.name) profileNames[gid] = data.name;
+      else if (data?.email) profileNames[gid] = data.email;
+    } catch { /* skip */ }
+  }));
 
   let resolved = text.replace(taskPattern, (match, gid) =>
     taskNames[gid] ? `"${taskNames[gid]}"` : match
   );
-  resolved = resolved.replace(userPattern, (match, gid) =>
-    userNames[gid] ? `@${userNames[gid]}` : match
+  resolved = resolved.replace(userPattern, (_match, gid) =>
+    profileNames[gid] ? `@${profileNames[gid]}` : '@usuario'
   );
 
   return resolved;
-}
-
-async function fetchAsanaNames(gids, resourceType, token) {
-  const names = {};
-  const chunks = [];
-  for (let i = 0; i < gids.length; i += 10) chunks.push(gids.slice(i, i + 10));
-
-  for (const chunk of chunks) {
-    await Promise.all(chunk.map(async (gid) => {
-      try {
-        const fields = resourceType === 'users' ? 'name,email' : 'name';
-        const r = await fetch(
-          `https://app.asana.com/api/1.0/${resourceType}/${gid}?opt_fields=${fields}`,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        if (r.ok) {
-          const json = await r.json();
-          const data = json.data;
-          if (data?.name) names[gid] = data.name;
-          else if (data?.email) names[gid] = data.email;
-        }
-      } catch { /* skip */ }
-    }));
-  }
-
-  return names;
 }

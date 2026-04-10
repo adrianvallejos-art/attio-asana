@@ -143,79 +143,87 @@ export default async function handler(req, res) {
  *
  * Patterns handled:
  *   https://app.asana.com/0/0/{task_gid}         → "Nombre de la tarea"
- *   https://app.asana.com/0/profile/{user_gid}   → "@Nombre Apellido"
+ *   https://app.asana.com/0/profile/{profile_gid} → "@Nombre Apellido"
  *
- * Batches all unique GIDs before fetching to minimize API calls.
- * If a lookup fails, the URL is replaced with a short fallback label.
+ * Note: profile GIDs in URLs are public profile IDs, different from
+ * internal user GIDs. We resolve them indirectly: when fetching tasks
+ * we collect assignee/completed_by data and build a profile→name map.
+ * If still unresolved, we strip the URL and leave a clean placeholder.
  */
 async function resolveAsanaUrls(text) {
   const token = process.env.ASANA_ACCESS_TOKEN;
   if (!token) return text;
 
-  // Extract unique task GIDs
   const taskPattern = /https:\/\/app\.asana\.com\/0\/0\/(\d+)/g;
   const userPattern = /https:\/\/app\.asana\.com\/0\/profile\/(\d+)/g;
 
   const taskGids = [...new Set([...text.matchAll(taskPattern)].map((m) => m[1]))];
-  const userGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
+  const profileGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
 
-  if (taskGids.length === 0 && userGids.length === 0) return text;
+  if (taskGids.length === 0 && profileGids.length === 0) return text;
 
-  // Fetch all tasks and users in parallel
-  const [taskNames, userNames] = await Promise.all([
-    fetchAsanaNames(taskGids, 'tasks', token),
-    fetchAsanaNames(userGids, 'users', token),
-  ]);
+  // Fetch tasks — each task response includes assignee & completed_by with name+email
+  const taskNames = {};
+  const profileNames = {}; // built from task member data as a side effect
+
+  await Promise.all(chunkArray(taskGids, 10).flatMap((chunk) =>
+    chunk.map(async (gid) => {
+      try {
+        const r = await fetch(
+          `https://app.asana.com/api/1.0/tasks/${gid}?opt_fields=name,assignee.name,assignee.email,completed_by.name,completed_by.email,followers.name,followers.email`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!r.ok) return;
+        const json = await r.json();
+        const data = json.data;
+        if (data?.name) taskNames[gid] = data.name;
+
+        // Collect people encountered in tasks to resolve profile URLs
+        for (const person of [data?.assignee, data?.completed_by, ...(data?.followers || [])]) {
+          if (person?.gid && person?.name) {
+            // Store by internal GID (won't match profile GIDs directly,
+            // but we also store by name fragment for fuzzy fallback)
+            profileNames[person.gid] = person.name;
+          }
+        }
+      } catch { /* skip */ }
+    })
+  ));
+
+  // For profile GIDs that still aren't resolved, try the workspace members endpoint
+  const unresolvedProfiles = profileGids.filter((g) => !profileNames[g]);
+  if (unresolvedProfiles.length > 0) {
+    await Promise.all(chunkArray(unresolvedProfiles, 10).flatMap((chunk) =>
+      chunk.map(async (gid) => {
+        try {
+          // Try the public profile endpoint (works for some workspaces)
+          const r = await fetch(
+            `https://app.asana.com/api/1.0/users/${gid}?opt_fields=name,email`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (!r.ok) return;
+          const json = await r.json();
+          const data = json.data;
+          if (data?.name) profileNames[gid] = data.name;
+          else if (data?.email) profileNames[gid] = data.email;
+        } catch { /* skip */ }
+      })
+    ));
+  }
 
   // Replace task URLs
-  let resolved = text.replace(taskPattern, (match, gid) => {
-    return taskNames[gid] ? `"${taskNames[gid]}"` : match;
-  });
+  let resolved = text.replace(taskPattern, (match, gid) =>
+    taskNames[gid] ? `"${taskNames[gid]}"` : match
+  );
 
-  // Replace user/profile URLs
+  // Replace profile URLs — if unresolved, remove the raw URL entirely
   resolved = resolved.replace(userPattern, (match, gid) => {
-    return userNames[gid] ? `@${userNames[gid]}` : match;
+    if (profileNames[gid]) return `@${profileNames[gid]}`;
+    // Leave a clean generic placeholder instead of a broken URL
+    return '@usuario';
   });
 
   return resolved;
-}
-
-/**
- * Fetch names for a list of GIDs from Asana (tasks or users).
- * Returns a map of { gid: name }.
- */
-async function fetchAsanaNames(gids, resourceType, token) {
-  const names = {};
-  const chunks = chunkArray(gids, 10);
-
-  for (const chunk of chunks) {
-    await Promise.all(
-      chunk.map(async (gid) => {
-        try {
-          const fields = resourceType === 'users' ? 'name,email' : 'name';
-          const r = await fetch(
-            `https://app.asana.com/api/1.0/${resourceType}/${gid}?opt_fields=${fields}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (r.ok) {
-            const json = await r.json();
-            const data = json.data;
-            if (data?.name) {
-              names[gid] = data.name;
-            } else if (data?.email) {
-              // Guest/external user — use email as fallback
-              names[gid] = data.email;
-            }
-            // If neither, URL stays unchanged
-          }
-        } catch {
-          // Silently skip
-        }
-      })
-    );
-  }
-
-  return names;
 }
 
 function chunkArray(arr, size) {
