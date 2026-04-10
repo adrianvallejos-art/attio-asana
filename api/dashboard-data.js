@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   do {
     const url = nextPage
       ? `https://app.asana.com/api/1.0${nextPage}`
-      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=name,gid,archived,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title&limit=100`;
+      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=name,gid,archived,completed,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title&limit=100`;
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) return res.status(500).json({ error: `Asana fetch failed: ${r.status}` });
@@ -99,8 +99,11 @@ export default async function handler(req, res) {
     }
 
     const statusTitle = project.current_status?.title?.trim() || null;
+    const statusColor = project.current_status?.color || null;
     const CLOSED_STATUSES = ['finalizado', 'descartado'];
     const is_closed = !!project.archived ||
+      !!project.completed ||
+      statusColor === 'complete' ||
       (statusTitle && CLOSED_STATUSES.some(s => statusTitle.toLowerCase().includes(s)));
 
     return {
