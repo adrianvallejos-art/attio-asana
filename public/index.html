@@ -704,7 +704,8 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast(data.note_created ? 'Nota creada en Attio ✓' : 'Sync ejecutado (nota omitida)', data.note_created ? 'success' : '');
+      const noteOk = data.note_created === true || data.note?.status === 'created';
+      showToast(noteOk ? 'Nota creada en Attio ✓' : 'Sync ejecutado (nota omitida)', noteOk ? 'success' : '');
       setTimeout(loadData, 1500);
     } catch (e) {
       showToast('Error: ' + e.message, 'error');
