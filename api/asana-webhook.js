@@ -16,6 +16,8 @@ const ATTIO_ONB_FIELD = 'Attio ONB ID'; // Custom field name in Asana
  * custom field. If found, creates the mapping automatically.
  * If not found, skips silently without breaking the operation.
  */
+export const config = { api: { bodyParser: true } };
+
 export default async function handler(req, res) {
   // ── 1. Asana Webhook Handshake ──────────────────────────────────
   const hookSecret = req.headers['x-hook-secret'];
@@ -48,14 +50,19 @@ export default async function handler(req, res) {
   }
 
   const signature = req.headers['x-hook-signature'];
-  if (signature && process.env.ASANA_WEBHOOK_SECRET) {
-    const hmac = crypto
-      .createHmac('sha256', process.env.ASANA_WEBHOOK_SECRET)
-      .update(JSON.stringify(req.body))
-      .digest('hex');
-    if (hmac !== signature) {
-      console.warn('[asana-webhook] Invalid signature');
-      return res.status(401).json({ error: 'Invalid signature' });
+  const secret = process.env.ASANA_WEBHOOK_SECRET;
+  if (signature && secret) {
+    try {
+      const hmac = crypto
+        .createHmac('sha256', secret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+      if (hmac !== signature) {
+        console.warn('[asana-webhook] Invalid signature');
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
+    } catch (e) {
+      console.warn('[asana-webhook] Signature check failed:', e.message);
     }
   }
 
