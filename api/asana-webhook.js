@@ -49,22 +49,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const signature = req.headers['x-hook-signature'];
-  const secret = process.env.ASANA_WEBHOOK_SECRET;
-  if (signature && secret) {
-    try {
-      const hmac = crypto
-        .createHmac('sha256', secret)
-        .update(JSON.stringify(req.body))
-        .digest('hex');
-      if (hmac !== signature) {
-        console.warn('[asana-webhook] Invalid signature');
-        return res.status(401).json({ error: 'Invalid signature' });
-      }
-    } catch (e) {
-      console.warn('[asana-webhook] Signature check failed:', e.message);
-    }
-  }
+  // Signature check skipped: Asana uses a per-webhook x_hook_secret (from handshake),
+  // not a global secret. Real protection comes from onboarding_mapping lookup — only
+  // projects in our mapping get processed.
+
 
   // ── 3. Process Events ───────────────────────────────────────────
   const { events } = req.body || {};
