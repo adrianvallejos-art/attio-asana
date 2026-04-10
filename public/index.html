@@ -335,6 +335,36 @@
     .toast.error { border-color: #fc8181; color: #fc8181; }
 
     .last-updated { font-size: 11px; color: #4a5568; margin-left: 8px; }
+
+    /* Work-status toggle */
+    .work-toggle {
+      display: flex;
+      gap: 4px;
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 24px;
+      padding: 3px;
+    }
+
+    .work-toggle button {
+      padding: 5px 16px;
+      border-radius: 20px;
+      border: none;
+      background: transparent;
+      color: #718096;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .work-toggle button.active {
+      background: #2d3148;
+      color: #e2e8f0;
+    }
+
+    .badge.closed { background: #1e2235; color: #4a5568; }
+    .badge.active-proj { background: #1a3a2a; color: #48bb78; }
   </style>
 </head>
 <body>
@@ -353,15 +383,24 @@
   <!-- Summary cards -->
   <div class="summary" id="summary">
     <div class="card muted"><div class="label">Total proyectos</div><div class="value" id="s-total">—</div></div>
+    <div class="card ok"><div class="label">Trabajo activo</div><div class="value" id="s-active">—</div></div>
+    <div class="card muted"><div class="label">Trabajo cerrado</div><div class="value" id="s-closed">—</div></div>
     <div class="card ok"><div class="label">Sincronizados</div><div class="value" id="s-ok">—</div></div>
     <div class="card failed"><div class="label">Con errores</div><div class="value" id="s-failed">—</div></div>
-    <div class="card warn"><div class="label">Sin webhook</div><div class="value" id="s-webhook">—</div></div>
     <div class="card info"><div class="label">Sin Attio ID</div><div class="value" id="s-noid">—</div></div>
-    <div class="card muted"><div class="label">Sin sincronizar</div><div class="value" id="s-never">—</div></div>
   </div>
 
   <!-- Toolbar -->
   <div class="toolbar">
+    <!-- Work status toggle (active/closed) -->
+    <div class="work-toggle">
+      <button id="ws-active" class="active" onclick="setWorkStatus('active', this)">Trabajo sin finalizar</button>
+      <button id="ws-closed" onclick="setWorkStatus('closed', this)">Trabajo cerrado</button>
+      <button id="ws-all" onclick="setWorkStatus('all', this)">Todos</button>
+    </div>
+
+    <div style="width:1px;height:20px;background:#2d3148;margin:0 4px;"></div>
+
     <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">Todos</button>
     <button class="filter-btn" data-filter="sync_failed" onclick="setFilter('sync_failed', this)">Con errores</button>
     <button class="filter-btn" data-filter="no_webhook" onclick="setFilter('no_webhook', this)">Sin webhook</button>
@@ -377,6 +416,7 @@
       <thead>
         <tr>
           <th>Proyecto</th>
+          <th>Asana</th>
           <th>Attio ID</th>
           <th>Webhook</th>
           <th>Último sync</th>
@@ -385,7 +425,7 @@
         </tr>
       </thead>
       <tbody id="tableBody">
-        <tr><td colspan="6"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
+        <tr><td colspan="7"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -398,6 +438,7 @@
   const API = '';  // same origin
   let allProjects = [];
   let currentFilter = 'all';
+  let currentWorkStatus = 'active';  // default: show only active projects
   let currentSearch = '';
   let openRow = null;
 
@@ -429,16 +470,23 @@
   function updateSummary(s) {
     if (!s) return;
     document.getElementById('s-total').textContent = s.total ?? 0;
+    document.getElementById('s-active').textContent = s.active ?? 0;
+    document.getElementById('s-closed').textContent = s.closed ?? 0;
     document.getElementById('s-ok').textContent = s.ok ?? 0;
     document.getElementById('s-failed').textContent = s.sync_failed ?? 0;
-    document.getElementById('s-webhook').textContent = s.no_webhook ?? 0;
     document.getElementById('s-noid').textContent = s.no_attio_id ?? 0;
-    document.getElementById('s-never').textContent = s.never_synced ?? 0;
   }
 
   function setFilter(f, el) {
     currentFilter = f;
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    renderTable();
+  }
+
+  function setWorkStatus(ws, el) {
+    currentWorkStatus = ws;
+    document.querySelectorAll('.work-toggle button').forEach(b => b.classList.remove('active'));
     el.classList.add('active');
     renderTable();
   }
@@ -454,6 +502,13 @@
 
     let projects = allProjects;
 
+    // Apply work-status filter
+    if (currentWorkStatus === 'active') {
+      projects = projects.filter(p => !p.is_closed);
+    } else if (currentWorkStatus === 'closed') {
+      projects = projects.filter(p => p.is_closed);
+    }
+
     if (currentFilter !== 'all') {
       projects = projects.filter(p => p.status === currentFilter);
     }
@@ -466,7 +521,7 @@
     }
 
     if (projects.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
       return;
     }
 
@@ -526,12 +581,17 @@
       actions += `<button class="action-btn" onclick="triggerSync(event,'${p.gid}','${p.attio_record_id}')">▶ Sync</button>`;
     }
 
+    const closedBadge = p.is_closed
+      ? `<span class="badge closed" style="font-size:10px;">Cerrado</span>`
+      : `<span class="badge active-proj" style="font-size:10px;">Activo</span>`;
+
     return `
       <tr onclick="toggleDetail('${p.gid}')" id="row-${p.gid}">
         <td class="project-name">
           ${asanaColor(p.asana_status_color)}
           <a href="${asanaUrl}" target="_blank" onclick="event.stopPropagation()">${p.name}</a>
         </td>
+        <td>${closedBadge}</td>
         <td>${attioCell}</td>
         <td>${webhookCell}</td>
         <td>${lastSync}</td>
@@ -539,7 +599,7 @@
         <td onclick="event.stopPropagation()">${actions}</td>
       </tr>
       <tr id="detail-${p.gid}">
-        <td colspan="6" style="padding:0;">
+        <td colspan="7" style="padding:0;">
           <div class="detail-panel" id="panel-${p.gid}">
             ${renderDetail(p)}
           </div>
@@ -586,6 +646,7 @@
         <div class="detail-section">
           <h4>Información del proyecto</h4>
           <div class="detail-field"><span class="key">Asana GID</span><span class="val">${p.gid}</span></div>
+          <div class="detail-field"><span class="key">Estado Asana</span><span class="val">${p.is_closed ? 'Cerrado (archived)' : 'Activo'}</span></div>
           <div class="detail-field"><span class="key">Attio Record ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
           <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
           <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>

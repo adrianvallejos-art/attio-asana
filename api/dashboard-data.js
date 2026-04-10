@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   do {
     const url = nextPage
       ? `https://app.asana.com/api/1.0${nextPage}`
-      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=name,gid,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color&limit=100`;
+      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=name,gid,archived,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color&limit=100`;
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) return res.status(500).json({ error: `Asana fetch failed: ${r.status}` });
@@ -101,6 +101,7 @@ export default async function handler(req, res) {
     return {
       gid,
       name: project.name?.trim(),
+      is_closed: !!project.archived,
       attio_record_id: isValidUuid ? attioRecordId : null,
       attio_id_raw: attioRecordId,   // shows even if malformed
       has_mapping: !!mapping,
@@ -135,6 +136,8 @@ export default async function handler(req, res) {
 
   const summary = {
     total: result.length,
+    active: result.filter((p) => !p.is_closed).length,
+    closed: result.filter((p) => p.is_closed).length,
     ok: result.filter((p) => p.status === 'ok').length,
     no_attio_id: result.filter((p) => p.status === 'no_attio_id').length,
     no_webhook: result.filter((p) => p.status === 'no_webhook').length,
