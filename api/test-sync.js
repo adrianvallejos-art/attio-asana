@@ -40,14 +40,25 @@ export default async function handler(req, res) {
       })),
     };
 
-    // Try to fetch status updates
+    // Try to fetch status updates and resolve Asana URLs to real names
     try {
       const updates = await getProjectStatusUpdates(asana_project_gid, { limit: 3 });
+      if (updates?.length > 0 && updates[0].text) {
+        updates[0].text = await resolveAsanaUrls(updates[0].text);
+      }
       results.asana.recent_updates = updates?.map((u) => ({
         title: u.title,
         color: u.color,
         created_at: u.created_at,
+        text_preview: u.text ? u.text.slice(0, 500) + (u.text.length > 500 ? '...' : '') : null,
       }));
+      // Full resolved note preview
+      if (updates?.length > 0) {
+        results.asana.note_preview = buildNotePreview({
+          projectName: project.name,
+          update: updates[0],
+        });
+      }
     } catch (e) {
       results.asana.recent_updates_error = e.message;
     }
@@ -126,4 +137,77 @@ export default async function handler(req, res) {
   results.overall = allOk ? 'ready' : 'has_errors';
 
   return res.status(allOk ? 200 : 503).json(results);
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function buildNotePreview({ projectName, update }) {
+  const lines = [];
+  const now = new Date().toISOString().split('T')[0];
+  const colorMap = { green: 'En buen camino', yellow: 'En riesgo', red: 'Con problemas', blue: 'En espera', complete: 'Completado' };
+
+  lines.push(`Fecha: ${now}`);
+  lines.push(`Proyecto: ${projectName}`);
+  lines.push(`Tipo de evento: Actualización de proyecto`);
+  lines.push('');
+  lines.push('── Último status update ──');
+  if (update.title) lines.push(`Título: ${update.title}`);
+  if (update.color) lines.push(`Estado: ${colorMap[update.color] || update.color}`);
+  lines.push('');
+  if (update.text) lines.push(update.text);
+
+  return lines.join('\n');
+}
+
+async function resolveAsanaUrls(text) {
+  const token = process.env.ASANA_ACCESS_TOKEN;
+  if (!token) return text;
+
+  const taskPattern = /https:\/\/app\.asana\.com\/0\/0\/(\d+)/g;
+  const userPattern = /https:\/\/app\.asana\.com\/0\/profile\/(\d+)/g;
+
+  const taskGids = [...new Set([...text.matchAll(taskPattern)].map((m) => m[1]))];
+  const userGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
+
+  if (taskGids.length === 0 && userGids.length === 0) return text;
+
+  const [taskNames, userNames] = await Promise.all([
+    fetchAsanaNames(taskGids, 'tasks', token),
+    fetchAsanaNames(userGids, 'users', token),
+  ]);
+
+  let resolved = text.replace(taskPattern, (match, gid) =>
+    taskNames[gid] ? `"${taskNames[gid]}"` : match
+  );
+  resolved = resolved.replace(userPattern, (match, gid) =>
+    userNames[gid] ? `@${userNames[gid]}` : match
+  );
+
+  return resolved;
+}
+
+async function fetchAsanaNames(gids, resourceType, token) {
+  const names = {};
+  const chunks = [];
+  for (let i = 0; i < gids.length; i += 10) chunks.push(gids.slice(i, i + 10));
+
+  for (const chunk of chunks) {
+    await Promise.all(chunk.map(async (gid) => {
+      try {
+        const fields = resourceType === 'users' ? 'name,email' : 'name';
+        const r = await fetch(
+          `https://app.asana.com/api/1.0/${resourceType}/${gid}?opt_fields=${fields}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (r.ok) {
+          const json = await r.json();
+          const data = json.data;
+          if (data?.name) names[gid] = data.name;
+          else if (data?.email) names[gid] = data.email;
+        }
+      } catch { /* skip */ }
+    }));
+  }
+
+  return names;
 }

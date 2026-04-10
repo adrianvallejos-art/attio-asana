@@ -8,9 +8,10 @@ import { getProject, getProjectStatusUpdates } from './_asanaHelper.js';
  * Processes a pending sync_event (Asana → Attio):
  *   1. Reads the event from Supabase
  *   2. Fetches context from Asana (project details, status updates)
- *   3. Creates a Note in the Attio Onboarding record
- *   4. Optionally updates Attio properties based on heuristics
- *   5. Marks the event as completed
+ *   3. Resolves Asana URLs in the status text → real names (tasks, people)
+ *   4. Creates a Note in the Attio Onboarding record
+ *   5. Optionally updates Attio properties based on heuristics
+ *   6. Marks the event as completed
  *
  * Body: { sync_event_id: UUID }
  */
@@ -61,7 +62,12 @@ export default async function handler(req, res) {
       console.warn('[onboarding-sync] Could not fetch status updates:', e.message);
     }
 
-    // ── 3. Build the note content ───────────────────────────────
+    // ── 3. Resolve Asana URLs → real names ─────────────────────
+    if (statusUpdates.length > 0 && statusUpdates[0].text) {
+      statusUpdates[0].text = await resolveAsanaUrls(statusUpdates[0].text);
+    }
+
+    // ── 4. Build the note content ───────────────────────────────
     const asanaEvents = payload?.events || [];
     const noteContent = buildNoteContent({
       projectName,
@@ -71,7 +77,7 @@ export default async function handler(req, res) {
       projectDetails,
     });
 
-    // ── 4. Create Note in Attio ─────────────────────────────────
+    // ── 5. Create Note in Attio ─────────────────────────────────
     const ONBOARDING_SLUG = process.env.ATTIO_ONBOARDING_SLUG || 'onboarding';
     let noteCreated = false;
 
@@ -83,7 +89,6 @@ export default async function handler(req, res) {
       });
       noteCreated = true;
     } catch (e) {
-      // Non-fatal: log and continue — never block the operation
       console.warn(`[onboarding-sync] Note creation failed for ${attio_record_id} (skipping):`, e.message);
       await supabase.from('sync_events').update({
         status: 'completed',
@@ -93,7 +98,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, note_created: false, skipped_reason: e.message });
     }
 
-    // ── 5. Auto-detect property updates ─────────────────────────
+    // ── 6. Auto-detect property updates ─────────────────────────
     const propertyUpdates = detectPropertyUpdates(asanaEvents, projectDetails);
     if (Object.keys(propertyUpdates).length > 0) {
       try {
@@ -103,7 +108,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // ── 6. Mark completed ───────────────────────────────────────
+    // ── 7. Mark completed ───────────────────────────────────────
     await supabase.from('sync_events').update({
       status: 'completed',
       ai_analysis: {
@@ -120,20 +125,106 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    // Unexpected error — log but return 200 so Asana doesn't retry the webhook
     console.error('[onboarding-sync] Unexpected error:', err.message);
-
     await supabase.from('sync_events').update({
       status: 'failed',
       error_message: err.message,
       retry_count: (event.retry_count || 0) + 1,
     }).eq('id', sync_event_id).catch(() => {});
-
     return res.status(200).json({ success: false, error: err.message });
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── URL resolver ────────────────────────────────────────────────────────────
+
+/**
+ * Finds all Asana task and profile URLs in a text and replaces them
+ * with real names fetched from the Asana API.
+ *
+ * Patterns handled:
+ *   https://app.asana.com/0/0/{task_gid}         → "Nombre de la tarea"
+ *   https://app.asana.com/0/profile/{user_gid}   → "@Nombre Apellido"
+ *
+ * Batches all unique GIDs before fetching to minimize API calls.
+ * If a lookup fails, the URL is replaced with a short fallback label.
+ */
+async function resolveAsanaUrls(text) {
+  const token = process.env.ASANA_ACCESS_TOKEN;
+  if (!token) return text;
+
+  // Extract unique task GIDs
+  const taskPattern = /https:\/\/app\.asana\.com\/0\/0\/(\d+)/g;
+  const userPattern = /https:\/\/app\.asana\.com\/0\/profile\/(\d+)/g;
+
+  const taskGids = [...new Set([...text.matchAll(taskPattern)].map((m) => m[1]))];
+  const userGids = [...new Set([...text.matchAll(userPattern)].map((m) => m[1]))];
+
+  if (taskGids.length === 0 && userGids.length === 0) return text;
+
+  // Fetch all tasks and users in parallel
+  const [taskNames, userNames] = await Promise.all([
+    fetchAsanaNames(taskGids, 'tasks', token),
+    fetchAsanaNames(userGids, 'users', token),
+  ]);
+
+  // Replace task URLs
+  let resolved = text.replace(taskPattern, (match, gid) => {
+    return taskNames[gid] ? `"${taskNames[gid]}"` : match;
+  });
+
+  // Replace user/profile URLs
+  resolved = resolved.replace(userPattern, (match, gid) => {
+    return userNames[gid] ? `@${userNames[gid]}` : match;
+  });
+
+  return resolved;
+}
+
+/**
+ * Fetch names for a list of GIDs from Asana (tasks or users).
+ * Returns a map of { gid: name }.
+ */
+async function fetchAsanaNames(gids, resourceType, token) {
+  const names = {};
+  const chunks = chunkArray(gids, 10);
+
+  for (const chunk of chunks) {
+    await Promise.all(
+      chunk.map(async (gid) => {
+        try {
+          const fields = resourceType === 'users' ? 'name,email' : 'name';
+          const r = await fetch(
+            `https://app.asana.com/api/1.0/${resourceType}/${gid}?opt_fields=${fields}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (r.ok) {
+            const json = await r.json();
+            const data = json.data;
+            if (data?.name) {
+              names[gid] = data.name;
+            } else if (data?.email) {
+              // Guest/external user — use email as fallback
+              names[gid] = data.email;
+            }
+            // If neither, URL stays unchanged
+          }
+        } catch {
+          // Silently skip
+        }
+      })
+    );
+  }
+
+  return names;
+}
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
+// ─── Note builder ────────────────────────────────────────────────────────────
 
 function buildNoteContent({ projectName, eventType, asanaEvents, statusUpdates, projectDetails }) {
   const lines = [];
@@ -148,8 +239,9 @@ function buildNoteContent({ projectName, eventType, asanaEvents, statusUpdates, 
     const latest = statusUpdates[0];
     lines.push('── Último status update ──');
     if (latest.title) lines.push(`Título: ${latest.title}`);
-    if (latest.text) lines.push(latest.text);
     if (latest.color) lines.push(`Estado: ${formatStatusColor(latest.color)}`);
+    lines.push('');
+    if (latest.text) lines.push(latest.text);
     lines.push('');
   }
 
@@ -167,9 +259,6 @@ function buildNoteContent({ projectName, eventType, asanaEvents, statusUpdates, 
   if (projectDetails?.current_status) {
     lines.push('── Estado actual del proyecto ──');
     lines.push(`Color: ${formatStatusColor(projectDetails.current_status.color)}`);
-    if (projectDetails.current_status.text) {
-      lines.push(projectDetails.current_status.text);
-    }
   }
 
   return lines.join('\n');
@@ -196,29 +285,18 @@ function formatStatusColor(color) {
   return map[color] || color;
 }
 
-/**
- * Detect properties that can be auto-updated in Attio
- * based on Asana event patterns.
- * Phase 2 (AI) will replace this with Claude-powered analysis.
- */
-function detectPropertyUpdates(asanaEvents, projectDetails) {
+function detectPropertyUpdates(_asanaEvents, projectDetails) {
   const updates = {};
   if (!projectDetails) return updates;
-
   if (projectDetails.current_status?.color === 'complete') {
     updates['onboarding_status'] = [{ option: 'Completed' }];
   }
-
   if (projectDetails.current_status?.color === 'red') {
     updates['onboarding_status'] = [{ option: 'At Risk' }];
   }
-
   return updates;
 }
 
 function getSupabase() {
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_ANON_KEY
-  );
+  return createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 }
