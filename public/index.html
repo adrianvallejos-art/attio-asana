@@ -581,9 +581,10 @@
       actions += `<button class="action-btn" onclick="triggerSync(event,'${p.gid}','${p.attio_record_id}')">▶ Sync</button>`;
     }
 
+    const closedLabel = p.asana_status_title || (p.is_closed ? 'Cerrado' : 'Activo');
     const closedBadge = p.is_closed
-      ? `<span class="badge closed" style="font-size:10px;">Cerrado</span>`
-      : `<span class="badge active-proj" style="font-size:10px;">Activo</span>`;
+      ? `<span class="badge closed" style="font-size:10px;" title="${closedLabel}">${closedLabel}</span>`
+      : `<span class="badge active-proj" style="font-size:10px;" title="${closedLabel}">${closedLabel}</span>`;
 
     return `
       <tr onclick="toggleDetail('${p.gid}')" id="row-${p.gid}">
@@ -646,7 +647,7 @@
         <div class="detail-section">
           <h4>Información del proyecto</h4>
           <div class="detail-field"><span class="key">Asana GID</span><span class="val">${p.gid}</span></div>
-          <div class="detail-field"><span class="key">Estado Asana</span><span class="val">${p.is_closed ? 'Cerrado (archived)' : 'Activo'}</span></div>
+          <div class="detail-field"><span class="key">Estado Asana</span><span class="val">${p.asana_status_title || (p.is_closed ? 'Cerrado' : 'Activo')}</span></div>
           <div class="detail-field"><span class="key">Attio Record ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
           <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
           <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>
