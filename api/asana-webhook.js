@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
+const ATTIO_ONB_FIELD = 'Attio ONB ID'; // Custom field name in Asana
+
 /**
  * POST /api/asana-webhook
  *
@@ -9,8 +11,10 @@ import crypto from 'crypto';
  *   1. Handshake — Asana sends X-Hook-Secret, we echo it back
  *   2. Events   — Asana sends project/task change events
  *
- * Events are stored in sync_events for async processing
- * by the onboarding-sync endpoint.
+ * Auto-discovery: if the project has no mapping in Supabase,
+ * fetches the project from Asana and checks for the "Attio ONB ID"
+ * custom field. If found, creates the mapping automatically.
+ * If not found, skips silently without breaking the operation.
  */
 export default async function handler(req, res) {
   // ── 1. Asana Webhook Handshake ──────────────────────────────────
@@ -84,6 +88,9 @@ export default async function handler(req, res) {
   const inserted = [];
 
   for (const [projectGid, projectEvents] of Object.entries(byProject)) {
+    // ── 3a. Look up mapping in Supabase (fast path) ───────────────
+    let attioRecordId = null;
+
     const { data: mapping } = await supabase
       .from('onboarding_mapping')
       .select('attio_record_id')
@@ -91,9 +98,30 @@ export default async function handler(req, res) {
       .eq('active', true)
       .single();
 
-    if (!mapping) {
-      console.warn(`[asana-webhook] No mapping for Asana project ${projectGid} — skipping`);
-      continue;
+    if (mapping) {
+      attioRecordId = mapping.attio_record_id;
+    } else {
+      // ── 3b. Fallback: read Attio ONB ID from Asana custom field ──
+      attioRecordId = await getAttioIdFromAsana(projectGid);
+
+      if (attioRecordId) {
+        // Auto-create mapping so future events use the fast path
+        await supabase.from('onboarding_mapping').upsert(
+          {
+            asana_project_gid: projectGid,
+            attio_record_id: attioRecordId,
+            team: 'onboarding',
+            active: true,
+          },
+          { onConflict: 'asana_project_gid' }
+        ).catch((e) => console.warn('[asana-webhook] Auto-mapping insert failed:', e.message));
+
+        console.log(`[asana-webhook] Auto-mapped project ${projectGid} → Attio ${attioRecordId}`);
+      } else {
+        // No Attio ID anywhere — skip this project silently
+        console.log(`[asana-webhook] Project ${projectGid} has no Attio ONB ID — skipping`);
+        continue;
+      }
     }
 
     const hasProjectChange = projectEvents.some(
@@ -105,7 +133,7 @@ export default async function handler(req, res) {
       source: 'asana',
       event_type: eventType,
       asana_project_gid: projectGid,
-      attio_record_id: mapping.attio_record_id,
+      attio_record_id: attioRecordId,
       payload: { events: projectEvents },
       status: 'pending',
     }).select('id');
@@ -137,6 +165,34 @@ export default async function handler(req, res) {
     events_received: events.length,
     events_queued: inserted.length,
   });
+}
+
+/**
+ * Fetch the Attio ONB ID from the Asana project's custom fields.
+ * Returns null if the field is missing or empty — never throws.
+ */
+async function getAttioIdFromAsana(projectGid) {
+  try {
+    const token = process.env.ASANA_ACCESS_TOKEN;
+    if (!token) return null;
+
+    const res = await fetch(
+      `https://app.asana.com/api/1.0/projects/${projectGid}?opt_fields=custom_fields.name,custom_fields.text_value,custom_fields.display_value`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const field = json.data?.custom_fields?.find((f) => f.name === ATTIO_ONB_FIELD);
+    const value = field?.text_value || field?.display_value || null;
+
+    // Validate it looks like a UUID
+    if (value && /^[0-9a-f-]{36}$/i.test(value)) return value;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 function getSupabase() {

@@ -73,12 +73,25 @@ export default async function handler(req, res) {
 
     // ── 4. Create Note in Attio ─────────────────────────────────
     const ONBOARDING_SLUG = process.env.ATTIO_ONBOARDING_SLUG || 'onboarding';
+    let noteCreated = false;
 
-    await createAttioNote(attio_record_id, ONBOARDING_SLUG, {
-      title: `Asana Update — ${projectName}`,
-      content: noteContent,
-      format: 'plaintext',
-    });
+    try {
+      await createAttioNote(attio_record_id, ONBOARDING_SLUG, {
+        title: `Asana Update — ${projectName}`,
+        content: noteContent,
+        format: 'plaintext',
+      });
+      noteCreated = true;
+    } catch (e) {
+      // Non-fatal: log and continue — never block the operation
+      console.warn(`[onboarding-sync] Note creation failed for ${attio_record_id} (skipping):`, e.message);
+      await supabase.from('sync_events').update({
+        status: 'completed',
+        error_message: `Note skipped: ${e.message}`,
+        ai_analysis: { note_created: false, project_name: projectName },
+      }).eq('id', sync_event_id);
+      return res.status(200).json({ success: true, note_created: false, skipped_reason: e.message });
+    }
 
     // ── 5. Auto-detect property updates ─────────────────────────
     const propertyUpdates = detectPropertyUpdates(asanaEvents, projectDetails);
@@ -94,7 +107,7 @@ export default async function handler(req, res) {
     await supabase.from('sync_events').update({
       status: 'completed',
       ai_analysis: {
-        note_created: true,
+        note_created: noteCreated,
         properties_updated: Object.keys(propertyUpdates),
         project_name: projectName,
       },
@@ -102,20 +115,21 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      note_created: true,
+      note_created: noteCreated,
       properties_updated: Object.keys(propertyUpdates),
     });
 
   } catch (err) {
-    console.error('[onboarding-sync] Error:', err.message);
+    // Unexpected error — log but return 200 so Asana doesn't retry the webhook
+    console.error('[onboarding-sync] Unexpected error:', err.message);
 
     await supabase.from('sync_events').update({
       status: 'failed',
       error_message: err.message,
       retry_count: (event.retry_count || 0) + 1,
-    }).eq('id', sync_event_id);
+    }).eq('id', sync_event_id).catch(() => {});
 
-    return res.status(500).json({ error: err.message });
+    return res.status(200).json({ success: false, error: err.message });
   }
 }
 
