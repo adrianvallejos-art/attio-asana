@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Onboarding Sync — Attio ↔ Asana</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1d27;
+      border-bottom: 1px solid #2d3148;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      font-size: 17px;
+      font-weight: 600;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    header h1 span { color: #6c72e6; }
+
+    .refresh-btn {
+      background: #2d3148;
+      border: 1px solid #3d4168;
+      color: #a0aec0;
+      padding: 7px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all .15s;
+    }
+
+    .refresh-btn:hover { background: #3d4168; color: #fff; }
+    .refresh-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 28px; }
+
+    /* Summary cards */
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+
+    .card {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 10px;
+      padding: 16px 18px;
+    }
+
+    .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #718096; margin-bottom: 6px; }
+    .card .value { font-size: 28px; font-weight: 700; }
+    .card.ok .value { color: #48bb78; }
+    .card.failed .value { color: #fc8181; }
+    .card.warn .value { color: #f6ad55; }
+    .card.info .value { color: #63b3ed; }
+    .card.muted .value { color: #718096; }
+
+    /* Filters */
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 18px;
+      flex-wrap: wrap;
+    }
+
+    .filter-btn {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #2d3148;
+      background: transparent;
+      color: #718096;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all .15s;
+    }
+
+    .filter-btn.active, .filter-btn:hover {
+      background: #2d3148;
+      color: #e2e8f0;
+      border-color: #3d4168;
+    }
+
+    .search-input {
+      margin-left: auto;
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      padding: 7px 14px;
+      color: #e2e8f0;
+      font-size: 13px;
+      width: 240px;
+      outline: none;
+    }
+
+    .search-input:focus { border-color: #6c72e6; }
+    .search-input::placeholder { color: #4a5568; }
+
+    /* Table */
+    .table-wrap {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    thead th {
+      padding: 11px 16px;
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #4a5568;
+      border-bottom: 1px solid #2d3148;
+      background: #141720;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #1e2235;
+      transition: background .1s;
+      cursor: pointer;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1e2235; }
+
+    td { padding: 13px 16px; font-size: 13px; vertical-align: middle; }
+
+    .project-name { font-weight: 500; color: #e2e8f0; }
+    .project-name a {
+      color: inherit;
+      text-decoration: none;
+    }
+    .project-name a:hover { color: #6c72e6; }
+
+    .attio-id {
+      font-family: monospace;
+      font-size: 11px;
+      color: #718096;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* Status badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge.ok { background: #1a3a2a; color: #48bb78; }
+    .badge.failed { background: #3a1a1a; color: #fc8181; }
+    .badge.warn { background: #3a2a1a; color: #f6ad55; }
+    .badge.info { background: #1a2a3a; color: #63b3ed; }
+    .badge.muted { background: #2d3148; color: #718096; }
+
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    /* Asana project color */
+    .asana-color {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      flex-shrink: 0;
+    }
+
+    .asana-color.green { background: #48bb78; }
+    .asana-color.yellow { background: #f6ad55; }
+    .asana-color.red { background: #fc8181; }
+    .asana-color.blue { background: #63b3ed; }
+    .asana-color.complete { background: #9f7aea; }
+
+    /* Actions column */
+    .action-btn {
+      background: #2d3148;
+      border: 1px solid #3d4168;
+      color: #a0aec0;
+      padding: 5px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all .15s;
+      white-space: nowrap;
+    }
+
+    .action-btn:hover { background: #3d4168; color: #fff; }
+    .action-btn.primary { background: #3d3f8f; border-color: #6c72e6; color: #c3c6ff; }
+    .action-btn.primary:hover { background: #6c72e6; color: #fff; }
+    .action-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* Detail panel */
+    .detail-panel {
+      display: none;
+      background: #141720;
+      border-top: 1px solid #2d3148;
+    }
+
+    .detail-panel.open { display: block; }
+
+    .detail-inner {
+      padding: 18px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .detail-section h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #4a5568;
+      margin-bottom: 10px;
+    }
+
+    .detail-field {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 6px 0;
+      border-bottom: 1px solid #1e2235;
+      font-size: 12px;
+      gap: 12px;
+    }
+
+    .detail-field:last-child { border-bottom: none; }
+    .detail-field .key { color: #718096; flex-shrink: 0; }
+    .detail-field .val { color: #e2e8f0; text-align: right; word-break: break-all; font-family: monospace; font-size: 11px; }
+
+    .history-item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #1a1d27;
+      margin-bottom: 6px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .history-item .time { color: #4a5568; font-size: 11px; white-space: nowrap; }
+    .history-item .err { color: #fc8181; font-size: 11px; margin-top: 3px; }
+
+    /* Attio ID input inline */
+    .id-input-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .id-input-row input {
+      flex: 1;
+      background: #0f1117;
+      border: 1px solid #3d4168;
+      border-radius: 6px;
+      color: #e2e8f0;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-family: monospace;
+      outline: none;
+    }
+
+    .id-input-row input:focus { border-color: #6c72e6; }
+
+    /* Loading / empty */
+    .loading, .empty {
+      text-align: center;
+      padding: 60px 20px;
+      color: #4a5568;
+      font-size: 14px;
+    }
+
+    .loading .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid #2d3148;
+      border-top-color: #6c72e6;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      margin: 0 auto 14px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #2d3148;
+      border: 1px solid #3d4168;
+      border-radius: 10px;
+      padding: 12px 18px;
+      font-size: 13px;
+      color: #e2e8f0;
+      z-index: 999;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: all .25s;
+      max-width: 320px;
+    }
+
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { border-color: #48bb78; color: #48bb78; }
+    .toast.error { border-color: #fc8181; color: #fc8181; }
+
+    .last-updated { font-size: 11px; color: #4a5568; margin-left: 8px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6c72e6" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+    Onboarding Sync <span>Attio ↔ Asana</span>
+    <span class="last-updated" id="lastUpdated"></span>
+  </h1>
+  <button class="refresh-btn" id="refreshBtn" onclick="loadData()">↻ Actualizar</button>
+</header>
+
+<div class="container">
+
+  <!-- Summary cards -->
+  <div class="summary" id="summary">
+    <div class="card muted"><div class="label">Total proyectos</div><div class="value" id="s-total">—</div></div>
+    <div class="card ok"><div class="label">Sincronizados</div><div class="value" id="s-ok">—</div></div>
+    <div class="card failed"><div class="label">Con errores</div><div class="value" id="s-failed">—</div></div>
+    <div class="card warn"><div class="label">Sin webhook</div><div class="value" id="s-webhook">—</div></div>
+    <div class="card info"><div class="label">Sin Attio ID</div><div class="value" id="s-noid">—</div></div>
+    <div class="card muted"><div class="label">Sin sincronizar</div><div class="value" id="s-never">—</div></div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">Todos</button>
+    <button class="filter-btn" data-filter="sync_failed" onclick="setFilter('sync_failed', this)">Con errores</button>
+    <button class="filter-btn" data-filter="no_webhook" onclick="setFilter('no_webhook', this)">Sin webhook</button>
+    <button class="filter-btn" data-filter="no_attio_id" onclick="setFilter('no_attio_id', this)">Sin Attio ID</button>
+    <button class="filter-btn" data-filter="never_synced" onclick="setFilter('never_synced', this)">Sin sincronizar</button>
+    <button class="filter-btn" data-filter="ok" onclick="setFilter('ok', this)">OK</button>
+    <input class="search-input" type="text" placeholder="Buscar proyecto..." oninput="setSearch(this.value)" />
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Proyecto</th>
+          <th>Attio ID</th>
+          <th>Webhook</th>
+          <th>Último sync</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody">
+        <tr><td colspan="6"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  const API = '';  // same origin
+  let allProjects = [];
+  let currentFilter = 'all';
+  let currentSearch = '';
+  let openRow = null;
+
+  async function loadData() {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    btn.textContent = '↻ Cargando...';
+
+    try {
+      const res = await fetch(`${API}/api/dashboard-data`);
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.error || 'Error desconocido');
+
+      allProjects = data.projects || [];
+      updateSummary(data.summary);
+      renderTable();
+
+      const now = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+      document.getElementById('lastUpdated').textContent = `· Actualizado ${now}`;
+    } catch (e) {
+      showToast('Error al cargar datos: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '↻ Actualizar';
+    }
+  }
+
+  function updateSummary(s) {
+    if (!s) return;
+    document.getElementById('s-total').textContent = s.total ?? 0;
+    document.getElementById('s-ok').textContent = s.ok ?? 0;
+    document.getElementById('s-failed').textContent = s.sync_failed ?? 0;
+    document.getElementById('s-webhook').textContent = s.no_webhook ?? 0;
+    document.getElementById('s-noid').textContent = s.no_attio_id ?? 0;
+    document.getElementById('s-never').textContent = s.never_synced ?? 0;
+  }
+
+  function setFilter(f, el) {
+    currentFilter = f;
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    el.classList.add('active');
+    renderTable();
+  }
+
+  function setSearch(q) {
+    currentSearch = q.toLowerCase();
+    renderTable();
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('tableBody');
+    openRow = null;
+
+    let projects = allProjects;
+
+    if (currentFilter !== 'all') {
+      projects = projects.filter(p => p.status === currentFilter);
+    }
+
+    if (currentSearch) {
+      projects = projects.filter(p =>
+        p.name?.toLowerCase().includes(currentSearch) ||
+        p.attio_record_id?.toLowerCase().includes(currentSearch)
+      );
+    }
+
+    if (projects.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = projects.map(p => projectRow(p)).join('');
+  }
+
+  function statusBadge(p) {
+    const map = {
+      ok:           `<span class="badge ok"><span class="dot"></span>Sincronizado</span>`,
+      sync_failed:  `<span class="badge failed"><span class="dot"></span>Error en sync</span>`,
+      no_webhook:   `<span class="badge warn"><span class="dot"></span>Sin webhook</span>`,
+      no_attio_id:  `<span class="badge info"><span class="dot"></span>Sin Attio ID</span>`,
+      never_synced: `<span class="badge muted"><span class="dot"></span>Sin sincronizar</span>`,
+    };
+    return map[p.status] || `<span class="badge muted">${p.status}</span>`;
+  }
+
+  function asanaColor(color) {
+    if (!color) return '';
+    return `<span class="asana-color ${color}"></span>`;
+  }
+
+  function relativeTime(iso) {
+    if (!iso) return '—';
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'hace un momento';
+    if (mins < 60) return `hace ${mins}m`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `hace ${hrs}h`;
+    return `hace ${Math.floor(hrs / 24)}d`;
+  }
+
+  function projectRow(p) {
+    const asanaUrl = `https://app.asana.com/0/${p.gid}/list`;
+    const attioUrl = p.attio_record_id
+      ? `https://app.attio.com/atomchat/custom/onboardings/record/${p.attio_record_id}/overview`
+      : null;
+
+    const attioCell = p.attio_record_id
+      ? `<a href="${attioUrl}" target="_blank" class="attio-id" title="${p.attio_record_id}">${p.attio_record_id.split('-')[0]}…</a>`
+      : `<span style="color:#4a5568;font-size:11px;">No configurado</span>`;
+
+    const webhookCell = p.has_webhook
+      ? `<span class="badge ok" style="font-size:10px;">Activo</span>`
+      : `<span class="badge muted" style="font-size:10px;">No</span>`;
+
+    const lastSync = p.last_sync
+      ? `<span title="${p.last_sync.created_at}">${relativeTime(p.last_sync.created_at)}</span>`
+      : `<span style="color:#4a5568">Nunca</span>`;
+
+    let actions = '';
+    if (!p.has_webhook && p.attio_record_id) {
+      actions += `<button class="action-btn primary" onclick="registerWebhook(event,'${p.gid}','${p.attio_record_id}')">+ Webhook</button> `;
+    }
+    if (p.attio_record_id) {
+      actions += `<button class="action-btn" onclick="triggerSync(event,'${p.gid}','${p.attio_record_id}')">▶ Sync</button>`;
+    }
+
+    return `
+      <tr onclick="toggleDetail('${p.gid}')" id="row-${p.gid}">
+        <td class="project-name">
+          ${asanaColor(p.asana_status_color)}
+          <a href="${asanaUrl}" target="_blank" onclick="event.stopPropagation()">${p.name}</a>
+        </td>
+        <td>${attioCell}</td>
+        <td>${webhookCell}</td>
+        <td>${lastSync}</td>
+        <td>${statusBadge(p)}</td>
+        <td onclick="event.stopPropagation()">${actions}</td>
+      </tr>
+      <tr id="detail-${p.gid}">
+        <td colspan="6" style="padding:0;">
+          <div class="detail-panel" id="panel-${p.gid}">
+            ${renderDetail(p)}
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function renderDetail(p) {
+    const attioUrl = p.attio_record_id
+      ? `https://app.attio.com/atomchat/custom/onboardings/record/${p.attio_record_id}/overview`
+      : null;
+
+    const historyHtml = p.sync_history.length > 0
+      ? p.sync_history.map(e => `
+          <div class="history-item">
+            <div>
+              <span class="badge ${e.status === 'completed' ? 'ok' : e.status === 'failed' ? 'failed' : 'muted'}" style="font-size:10px;">${e.status}</span>
+              &nbsp;${e.event_type}
+              ${e.note_created === false ? '<span style="color:#f6ad55;font-size:10px;margin-left:6px;">nota omitida</span>' : ''}
+              ${e.error_message ? `<div class="err">${e.error_message}</div>` : ''}
+            </div>
+            <span class="time">${relativeTime(e.created_at)}</span>
+          </div>
+        `).join('')
+      : '<div style="color:#4a5568;font-size:12px;">Sin historial de sync</div>';
+
+    const noIdSection = !p.attio_record_id ? `
+      <div class="detail-section" style="grid-column:1/-1;">
+        <h4>Completar Attio ONB ID</h4>
+        <p style="font-size:12px;color:#718096;margin-bottom:8px;">
+          Este proyecto no tiene el campo "Attio ONB ID" en Asana.
+          Puedes registrarlo manualmente aquí y se guardará en el mapping.
+        </p>
+        <div class="id-input-row">
+          <input type="text" id="input-${p.gid}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <button class="action-btn primary" onclick="saveManualMapping('${p.gid}')">Guardar y registrar webhook</button>
+        </div>
+      </div>
+    ` : '';
+
+    return `
+      <div class="detail-inner">
+        <div class="detail-section">
+          <h4>Información del proyecto</h4>
+          <div class="detail-field"><span class="key">Asana GID</span><span class="val">${p.gid}</span></div>
+          <div class="detail-field"><span class="key">Attio Record ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
+          <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
+          <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>
+          ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver en Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir record →</a></span></div>` : ''}
+        </div>
+        <div class="detail-section">
+          <h4>Historial de sincronización</h4>
+          ${historyHtml}
+        </div>
+        ${noIdSection}
+      </div>
+    `;
+  }
+
+  function toggleDetail(gid) {
+    const panel = document.getElementById(`panel-${gid}`);
+    if (!panel) return;
+
+    if (openRow && openRow !== gid) {
+      const prev = document.getElementById(`panel-${openRow}`);
+      if (prev) prev.classList.remove('open');
+    }
+
+    panel.classList.toggle('open');
+    openRow = panel.classList.contains('open') ? gid : null;
+  }
+
+  async function registerWebhook(evt, gid, attioId) {
+    evt.stopPropagation();
+    showToast('Registrando webhook...', '');
+    try {
+      const res = await fetch('/api/register-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asana_project_gid: gid, attio_record_id: attioId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast('Webhook registrado correctamente', 'success');
+      setTimeout(loadData, 1000);
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    }
+  }
+
+  async function triggerSync(evt, gid, attioId) {
+    evt.stopPropagation();
+    showToast('Disparando sync...', '');
+    try {
+      const res = await fetch('/api/test-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asana_project_gid: gid, attio_record_id: attioId, dry_run: false }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast(data.note_created ? 'Nota creada en Attio ✓' : 'Sync ejecutado (nota omitida)', data.note_created ? 'success' : '');
+      setTimeout(loadData, 1500);
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    }
+  }
+
+  async function saveManualMapping(gid) {
+    const input = document.getElementById(`input-${gid}`);
+    const attioId = input?.value?.trim();
+    if (!attioId || !/^[0-9a-f-]{36}$/i.test(attioId)) {
+      showToast('UUID inválido — debe tener el formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', 'error');
+      return;
+    }
+    showToast('Guardando mapping...', '');
+    try {
+      const res = await fetch('/api/register-webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asana_project_gid: gid, attio_record_id: attioId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      showToast('Mapping guardado y webhook registrado ✓', 'success');
+      setTimeout(loadData, 1000);
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    }
+  }
+
+  let toastTimer;
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast show ${type || ''}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+  }
+
+  // Auto-refresh every 60s
+  loadData();
+  setInterval(loadData, 60000);
+</script>
+</body>
+</html>
