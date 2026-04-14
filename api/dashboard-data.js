@@ -1,27 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 
-const ONBOARDING_TEAM_GID = '1204050191559311';
+const ONBOARDING_PORTFOLIO_GID = '1209745158203291';
+const ONBOARDING_TEAM_GID = '1204050191559311';   // fallback: team-only projects
 const ATTIO_ONB_FIELD = 'Attio ONB ID';
+const PROJECT_OPT_FIELDS = 'name,gid,archived,completed,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title';
 
 /**
  * GET /api/dashboard-data
  *
- * Returns all Onboarding projects from Asana joined with
- * their sync state from Supabase.
- *
- * Each project includes:
- *   - name, gid
- *   - attio_record_id (from Asana custom field)
- *   - has_webhook (registered in asana_webhook_subs)
- *   - has_mapping (registered in onboarding_mapping)
- *   - last_sync  (most recent sync_event)
- *   - sync_history (last 5 events)
- *   - status: 'ok' | 'no_attio_id' | 'no_webhook' | 'sync_failed' | 'never_synced'
+ * Returns all Onboarding projects from Asana (portfolio-first, team as fallback)
+ * joined with their sync state from Supabase.
  */
 export default async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  // Allow CORS for the dashboard
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   const token = process.env.ASANA_ACCESS_TOKEN;
@@ -29,20 +21,46 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // ── 1. Fetch all projects from Onboarding team ─────────────────
+  // ── 1. Fetch all projects from Portfolio (primary source) ──────
+  const seenGids = new Set();
   let projects = [];
   let nextPage = null;
 
   do {
     const url = nextPage
       ? `https://app.asana.com/api/1.0${nextPage}`
-      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=name,gid,archived,completed,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title&limit=100`;
+      : `https://app.asana.com/api/1.0/portfolios/${ONBOARDING_PORTFOLIO_GID}/items?opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return res.status(500).json({ error: `Asana fetch failed: ${r.status}` });
+    if (!r.ok) return res.status(500).json({ error: `Asana portfolio fetch failed: ${r.status}` });
 
     const json = await r.json();
-    projects = projects.concat(json.data || []);
+    for (const item of json.data || []) {
+      if (!seenGids.has(item.gid)) {
+        seenGids.add(item.gid);
+        projects.push(item);
+      }
+    }
+    nextPage = json.next_page?.path || null;
+  } while (nextPage);
+
+  // ── 1b. Fallback: also fetch Onboarding team projects not in portfolio ──
+  nextPage = null;
+  do {
+    const url = nextPage
+      ? `https://app.asana.com/api/1.0${nextPage}`
+      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
+
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) break;  // non-fatal: portfolio is primary
+
+    const json = await r.json();
+    for (const item of json.data || []) {
+      if (!seenGids.has(item.gid)) {
+        seenGids.add(item.gid);
+        projects.push(item);
+      }
+    }
     nextPage = json.next_page?.path || null;
   } while (nextPage);
 
