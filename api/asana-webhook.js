@@ -62,18 +62,27 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
+  // Only trigger on project status updates (the colored bubble with text).
+  // Asana fires two events when a status is posted:
+  //   - resource_type='project_status', action='added'   ← primary signal
+  //   - resource_type='project',        action='changed' ← secondary (current_status field)
+  // Both are grouped by project GID so only ONE sync is queued per batch.
+  // Task events (completions, assignments, comments) are intentionally ignored.
   const relevantEvents = events.filter((e) =>
-    (e.resource?.resource_type === 'project' && e.action === 'changed') ||
-    (e.resource?.resource_type === 'task' && ['changed', 'added'].includes(e.action))
+    e.resource?.resource_type === 'project_status' ||
+    (e.resource?.resource_type === 'project' && e.action === 'changed')
   );
 
   if (relevantEvents.length === 0) {
     return res.status(200).json({ message: 'No relevant events' });
   }
 
-  // Group events by project GID
+  // Group by project GID — ensures only ONE sync per project per webhook call
+  // even if both project_status and project events arrive in the same batch.
   const byProject = {};
   for (const event of relevantEvents) {
+    // project_status events: parent.gid = project, resource.gid = status entry
+    // project changed events: resource.gid = project
     const projectGid = event.parent?.gid || event.resource?.gid;
     if (!projectGid) continue;
     if (!byProject[projectGid]) byProject[projectGid] = [];
@@ -119,10 +128,7 @@ export default async function handler(req, res) {
       }
     }
 
-    const hasProjectChange = projectEvents.some(
-      (e) => e.resource?.resource_type === 'project'
-    );
-    const eventType = hasProjectChange ? 'project_update' : 'task_completed';
+    const eventType = 'status_update';
 
     const { data, error } = await supabase.from('sync_events').insert({
       source: 'asana',
