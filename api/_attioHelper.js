@@ -53,6 +53,30 @@ export async function patchAttioRecord(objectSlug, recordId, values) {
 }
 
 /**
+ * List notes attached to an Attio record.
+ * Returns the raw Attio response (data array).
+ */
+export async function getAttioNotes(parentRecordId, parentObjectSlug) {
+  return attioFetch(`/notes?parent_object=${parentObjectSlug}&parent_record_id=${parentRecordId}&limit=50`);
+}
+
+/**
+ * Delete a single note by its note ID.
+ */
+export async function deleteAttioNote(noteId) {
+  const token = getToken();
+  const res = await fetch(`${ATTIO_BASE}/notes/${noteId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Attio DELETE /notes/${noteId} failed (${res.status}): ${JSON.stringify(err.error || err)}`);
+  }
+  return true;
+}
+
+/**
  * Create a Note on an Attio record.
  *
  * @param {string} parentRecordId   — The Attio record ID to attach the note to

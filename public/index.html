@@ -336,6 +336,60 @@
 
     .last-updated { font-size: 11px; color: #4a5568; margin-left: 8px; }
 
+    /* Notes panel */
+    .note-item {
+      background: #1a1d27;
+      border: 1px solid #2d3148;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .note-item .note-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .note-item .note-title {
+      font-weight: 600;
+      color: #e2e8f0;
+      flex: 1;
+    }
+
+    .note-item .note-date {
+      color: #4a5568;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .note-item .note-preview {
+      color: #718096;
+      font-size: 11px;
+      white-space: pre-wrap;
+      max-height: 60px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .note-item .delete-btn {
+      background: transparent;
+      border: 1px solid #3a1a1a;
+      color: #fc8181;
+      padding: 3px 10px;
+      border-radius: 5px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all .15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .note-item .delete-btn:hover { background: #3a1a1a; }
+
     /* Work-status toggle */
     .work-toggle {
       display: flex;
@@ -658,6 +712,16 @@
           ${historyHtml}
         </div>
         ${noIdSection}
+        ${p.attio_record_id ? `
+        <div class="detail-section" style="grid-column:1/-1;">
+          <h4 style="display:flex;justify-content:space-between;align-items:center;">
+            Notas en Attio
+            <button class="action-btn" onclick="loadNotes('${p.gid}','${p.attio_record_id}')">Cargar notas</button>
+          </h4>
+          <div id="notes-${p.gid}">
+            <div style="color:#4a5568;font-size:12px;">Haz clic en "Cargar notas" para ver las notas de este onboarding.</div>
+          </div>
+        </div>` : ''}
       </div>
     `;
   }
@@ -733,6 +797,62 @@
     } catch (e) {
       showToast('Error: ' + e.message, 'error');
     }
+  }
+
+  async function loadNotes(gid, attioId) {
+    const container = document.getElementById(`notes-${gid}`);
+    if (!container) return;
+    container.innerHTML = '<div style="color:#4a5568;font-size:12px;">Cargando notas...</div>';
+
+    try {
+      const res = await fetch(`/api/attio-notes?attio_record_id=${attioId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+
+      const notes = data.notes || [];
+      if (notes.length === 0) {
+        container.innerHTML = '<div style="color:#4a5568;font-size:12px;">Sin notas en Attio.</div>';
+        return;
+      }
+
+      container.innerHTML = notes.map(n => `
+        <div class="note-item" id="note-item-${n.id}">
+          <div class="note-header">
+            <span class="note-title">${escHtml(n.title || '(sin título)')}</span>
+            <span class="note-date">${n.created_at ? new Date(n.created_at).toLocaleString('es', {dateStyle:'short',timeStyle:'short'}) : '—'}</span>
+            <button class="delete-btn" onclick="deleteNote('${n.id}','${gid}','${attioId}')">Eliminar</button>
+          </div>
+          <div class="note-preview">${escHtml((n.content || '').slice(0, 200))}</div>
+        </div>
+      `).join('');
+    } catch (e) {
+      container.innerHTML = `<div style="color:#fc8181;font-size:12px;">Error: ${e.message}</div>`;
+    }
+  }
+
+  async function deleteNote(noteId, gid, attioId) {
+    if (!confirm('¿Eliminar esta nota de Attio? Esta acción no se puede deshacer.')) return;
+    try {
+      const res = await fetch('/api/attio-notes', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note_id: noteId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      document.getElementById(`note-item-${noteId}`)?.remove();
+      showToast('Nota eliminada', 'success');
+      const container = document.getElementById(`notes-${gid}`);
+      if (container && container.querySelectorAll('.note-item').length === 0) {
+        container.innerHTML = '<div style="color:#4a5568;font-size:12px;">Sin notas en Attio.</div>';
+      }
+    } catch (e) {
+      showToast('Error al eliminar: ' + e.message, 'error');
+    }
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
   let toastTimer;
