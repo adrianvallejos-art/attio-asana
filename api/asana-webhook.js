@@ -62,15 +62,12 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // Only trigger on project status updates (the colored bubble with text).
-  // Asana fires two events when a status is posted:
-  //   - resource_type='project_status', action='added'   ← primary signal
-  //   - resource_type='project',        action='changed' ← secondary (current_status field)
-  // Both are grouped by project GID so only ONE sync is queued per batch.
-  // Task events (completions, assignments, comments) are intentionally ignored.
+  // Only trigger when someone publishes a project status update (the colored
+  // bubble with text). Asana fires resource_type='project_status', action='added'
+  // for this exact action. Everything else — task changes, project field edits,
+  // membership changes, comments — is ignored.
   const relevantEvents = events.filter((e) =>
-    e.resource?.resource_type === 'project_status' ||
-    (e.resource?.resource_type === 'project' && e.action === 'changed')
+    e.resource?.resource_type === 'project_status' && e.action === 'added'
   );
 
   if (relevantEvents.length === 0) {
