@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 const ONBOARDING_PORTFOLIO_GID = '1209745158203291';
 const ONBOARDING_TEAM_GID = '1204050191559311';   // fallback: team-only projects
 const ATTIO_ONB_FIELD = 'Attio ONB ID';
-const PROJECT_OPT_FIELDS = 'name,gid,archived,completed,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title';
+const PROJECT_OPT_FIELDS = 'name,gid,archived,completed,created_at,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title';
 
 /**
  * GET /api/dashboard-data
@@ -93,9 +93,16 @@ export default async function handler(req, res) {
   const result = projects.map((project) => {
     const gid = project.gid;
 
-    const attioField = project.custom_fields?.find((f) => f.name === ATTIO_ONB_FIELD);
+    const cf = project.custom_fields || [];
+    const attioField = cf.find((f) => f.name === ATTIO_ONB_FIELD);
     const attioRecordId = attioField?.text_value || attioField?.display_value || null;
     const isValidUuid = attioRecordId && /^[0-9a-f-]{36}$/i.test(attioRecordId);
+
+    const attioCompanyField = cf.find((f) => f.name === 'Attio Company ID');
+    const attioCompanyId = attioCompanyField?.text_value || attioCompanyField?.display_value || null;
+
+    const atomIdField = cf.find((f) => f.name === 'Atom ID');
+    const atomId = atomIdField?.text_value || atomIdField?.display_value || null;
 
     const mapping = mappingByProject[gid] || null;
     const webhook = webhookByProject[gid] || null;
@@ -127,10 +134,13 @@ export default async function handler(req, res) {
     return {
       gid,
       name: project.name?.trim(),
+      created_at: project.created_at || null,
       is_closed,
       asana_status_title: statusTitle,
       attio_record_id: isValidUuid ? attioRecordId : null,
-      attio_id_raw: attioRecordId,   // shows even if malformed
+      attio_id_raw: attioRecordId,
+      attio_company_id: attioCompanyId,
+      atom_id: atomId,
       has_mapping: !!mapping,
       has_webhook: !!webhook,
       webhook_gid: webhook?.webhook_gid || null,

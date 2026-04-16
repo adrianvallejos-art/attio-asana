@@ -122,10 +122,10 @@
       overflow: hidden;
     }
 
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 
     thead th {
-      padding: 11px 16px;
+      padding: 11px 12px;
       text-align: left;
       font-size: 11px;
       font-weight: 600;
@@ -134,7 +134,19 @@
       color: #4a5568;
       border-bottom: 1px solid #2d3148;
       background: #141720;
+      white-space: nowrap;
+      overflow: hidden;
     }
+
+    /* Column widths */
+    thead th:nth-child(1) { width: 28%; }   /* Proyecto */
+    thead th:nth-child(2) { width: 8%; }    /* Asana (status) */
+    thead th:nth-child(3) { width: 10%; }   /* Fecha */
+    thead th:nth-child(4) { width: 13%; }   /* Attio ID */
+    thead th:nth-child(5) { width: 7%; }    /* Webhook */
+    thead th:nth-child(6) { width: 10%; }   /* Último sync */
+    thead th:nth-child(7) { width: 10%; }   /* Estado */
+    thead th:nth-child(8) { width: 14%; }   /* Acciones */
 
     tbody tr {
       border-bottom: 1px solid #1e2235;
@@ -145,12 +157,16 @@
     tbody tr:last-child { border-bottom: none; }
     tbody tr:hover { background: #1e2235; }
 
-    td { padding: 13px 16px; font-size: 13px; vertical-align: middle; }
+    td { padding: 11px 12px; font-size: 12px; vertical-align: middle; overflow: hidden; }
 
-    .project-name { font-weight: 500; color: #e2e8f0; }
+    .project-name { font-weight: 500; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }
     .project-name a {
       color: inherit;
       text-decoration: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
     }
     .project-name a:hover { color: #6c72e6; }
 
@@ -470,16 +486,17 @@
       <thead>
         <tr>
           <th>Proyecto</th>
-          <th>Asana</th>
+          <th>Estado</th>
+          <th>Creación</th>
           <th>Attio ID</th>
           <th>Webhook</th>
           <th>Último sync</th>
-          <th>Estado</th>
+          <th>Sync status</th>
           <th>Acciones</th>
         </tr>
       </thead>
       <tbody id="tableBody">
-        <tr><td colspan="7"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
+        <tr><td colspan="8"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -575,7 +592,7 @@
     }
 
     if (projects.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="7"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
       return;
     }
 
@@ -640,13 +657,20 @@
       ? `<span class="badge closed" style="font-size:10px;" title="${closedLabel}">${closedLabel}</span>`
       : `<span class="badge active-proj" style="font-size:10px;" title="${closedLabel}">${closedLabel}</span>`;
 
+    const createdDate = p.created_at
+      ? new Date(p.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })
+      : '—';
+
     return `
       <tr onclick="toggleDetail('${p.gid}')" id="row-${p.gid}">
-        <td class="project-name">
-          ${asanaColor(p.asana_status_color)}
-          <a href="${asanaUrl}" target="_blank" onclick="event.stopPropagation()">${p.name}</a>
+        <td>
+          <span class="project-name">
+            ${asanaColor(p.asana_status_color)}
+            <a href="${asanaUrl}" target="_blank" onclick="event.stopPropagation()" title="${escHtml(p.name)}">${escHtml(p.name)}</a>
+          </span>
         </td>
         <td>${closedBadge}</td>
+        <td style="color:#718096;font-size:11px;">${createdDate}</td>
         <td>${attioCell}</td>
         <td>${webhookCell}</td>
         <td>${lastSync}</td>
@@ -654,7 +678,7 @@
         <td onclick="event.stopPropagation()">${actions}</td>
       </tr>
       <tr id="detail-${p.gid}">
-        <td colspan="7" style="padding:0;">
+        <td colspan="8" style="padding:0;">
           <div class="detail-panel" id="panel-${p.gid}">
             ${renderDetail(p)}
           </div>
@@ -689,8 +713,10 @@
           Este proyecto no tiene el campo "Attio ONB ID" en Asana.
           Puedes registrarlo manualmente aquí y se guardará en el mapping.
         </p>
+        ${p.attio_company_id ? `<div class="detail-field" style="margin-bottom:6px;"><span class="key">Attio Company ID</span><span class="val">${p.attio_company_id}</span></div>` : ''}
+        ${p.atom_id ? `<div class="detail-field" style="margin-bottom:6px;"><span class="key">Atom ID</span><span class="val">${p.atom_id}</span></div>` : ''}
         <div class="id-input-row">
-          <input type="text" id="input-${p.gid}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          <input type="text" id="input-${p.gid}" placeholder="Attio ONB ID  (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)" />
           <button class="action-btn primary" onclick="saveManualMapping('${p.gid}')">Guardar y registrar webhook</button>
         </div>
       </div>
@@ -702,10 +728,13 @@
           <h4>Información del proyecto</h4>
           <div class="detail-field"><span class="key">Asana GID</span><span class="val">${p.gid}</span></div>
           <div class="detail-field"><span class="key">Estado Asana</span><span class="val">${p.asana_status_title || (p.is_closed ? 'Cerrado' : 'Activo')}</span></div>
-          <div class="detail-field"><span class="key">Attio Record ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
+          <div class="detail-field"><span class="key">Attio ONB ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
+          <div class="detail-field"><span class="key">Attio Company ID</span><span class="val">${p.attio_company_id || '—'}</span></div>
+          <div class="detail-field"><span class="key">Atom ID</span><span class="val">${p.atom_id || '—'}</span></div>
           <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
           <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>
-          ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver en Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir record →</a></span></div>` : ''}
+          ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver en Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir ONB →</a></span></div>` : ''}
+          ${p.attio_company_id ? `<div class="detail-field"><span class="key">Ver Company</span><span class="val"><a href="https://app.attio.com/atomchat/companies/record/${p.attio_company_id}/overview" target="_blank" style="color:#6c72e6;">Abrir Company →</a></span></div>` : ''}
         </div>
         <div class="detail-section">
           <h4>Historial de sincronización</h4>
