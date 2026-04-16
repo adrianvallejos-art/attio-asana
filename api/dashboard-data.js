@@ -4,6 +4,7 @@ const ONBOARDING_PORTFOLIO_GID = '1209745158203291';
 const ONBOARDING_TEAM_GID = '1204050191559311';   // fallback: team-only projects
 const ATTIO_ONB_FIELD = 'Attio ONB ID';
 const PROJECT_OPT_FIELDS = 'name,gid,archived,completed,created_at,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title';
+const PORTFOLIO_NAME = 'OB Customers';
 
 /**
  * GET /api/dashboard-data
@@ -38,6 +39,7 @@ export default async function handler(req, res) {
     for (const item of json.data || []) {
       if (!seenGids.has(item.gid)) {
         seenGids.add(item.gid);
+        item._portfolio = PORTFOLIO_NAME;
         projects.push(item);
       }
     }
@@ -52,12 +54,13 @@ export default async function handler(req, res) {
       : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
 
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) break;  // non-fatal: portfolio is primary
+    if (!r.ok) break;
 
     const json = await r.json();
     for (const item of json.data || []) {
       if (!seenGids.has(item.gid)) {
         seenGids.add(item.gid);
+        item._portfolio = 'Onboarding';
         projects.push(item);
       }
     }
@@ -105,6 +108,15 @@ export default async function handler(req, res) {
     const atomIdField = cf.find((f) => f.name === 'Atom ID');
     const atomId = atomIdField?.text_value || atomIdField?.display_value || null;
 
+    // Auto-extract Atom ID from project name: "Company (AtomID)" → "AtomID"
+    const nameMatch = project.name?.match(/\(([^)]+)\)\s*$/);
+    const atomIdFromName = nameMatch ? nameMatch[1].trim() : null;
+
+    const cicloDeVidaField = cf.find((f) => f.name === 'Ciclo de vida');
+    const cicloDeVida = cicloDeVidaField?.display_value || null;
+
+    const portfolio = project._portfolio || PORTFOLIO_NAME;
+
     // Field GIDs needed to PATCH custom fields back to Asana
     const fieldGids = {
       attio_onb_id: attioField?.gid || null,
@@ -149,6 +161,9 @@ export default async function handler(req, res) {
       attio_id_raw: attioRecordId,
       attio_company_id: attioCompanyId,
       atom_id: atomId,
+      atom_id_from_name: atomId ? null : atomIdFromName,
+      ciclo_de_vida: cicloDeVida,
+      portfolio,
       field_gids: fieldGids,
       has_mapping: !!mapping,
       has_webhook: !!webhook,

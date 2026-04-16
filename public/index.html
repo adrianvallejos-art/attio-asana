@@ -504,23 +504,29 @@
   </div>
 
   <!-- Toolbar -->
-  <div class="toolbar">
-    <!-- Work status toggle (active/closed) -->
-    <div class="work-toggle">
-      <button id="ws-active" class="active" onclick="setWorkStatus('active', this)">Trabajo sin finalizar</button>
-      <button id="ws-closed" onclick="setWorkStatus('closed', this)">Trabajo cerrado</button>
-      <button id="ws-all" onclick="setWorkStatus('all', this)">Todos</button>
+  <div class="toolbar" style="flex-wrap:wrap;gap:8px;">
+    <!-- Row 1: work status + collection -->
+    <div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap;">
+      <div class="work-toggle">
+        <button id="ws-active" class="active" onclick="setWorkStatus('active', this)">Trabajo sin finalizar</button>
+        <button id="ws-closed" onclick="setWorkStatus('closed', this)">Trabajo cerrado</button>
+        <button id="ws-all" onclick="setWorkStatus('all', this)">Todos</button>
+      </div>
+      <div style="width:1px;height:20px;background:#2d3148;"></div>
+      <span style="font-size:11px;color:#4a5568;text-transform:uppercase;letter-spacing:.06em;">Portfolio</span>
+      <div id="collectionFilter" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     </div>
 
-    <div style="width:1px;height:20px;background:#2d3148;margin:0 4px;"></div>
-
-    <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">Todos</button>
-    <button class="filter-btn" data-filter="sync_failed" onclick="setFilter('sync_failed', this)">Con errores</button>
-    <button class="filter-btn" data-filter="no_webhook" onclick="setFilter('no_webhook', this)">Sin webhook</button>
-    <button class="filter-btn" data-filter="no_attio_id" onclick="setFilter('no_attio_id', this)">Sin Attio ID</button>
-    <button class="filter-btn" data-filter="never_synced" onclick="setFilter('never_synced', this)">Sin sincronizar</button>
-    <button class="filter-btn" data-filter="ok" onclick="setFilter('ok', this)">OK</button>
-    <input class="search-input" type="text" placeholder="Buscar proyecto..." oninput="setSearch(this.value)" />
+    <!-- Row 2: sync status + search -->
+    <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;">
+      <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">Todos</button>
+      <button class="filter-btn" data-filter="sync_failed" onclick="setFilter('sync_failed', this)">Con errores</button>
+      <button class="filter-btn" data-filter="no_webhook" onclick="setFilter('no_webhook', this)">Sin webhook</button>
+      <button class="filter-btn" data-filter="no_attio_id" onclick="setFilter('no_attio_id', this)">Sin Attio ID</button>
+      <button class="filter-btn" data-filter="never_synced" onclick="setFilter('never_synced', this)">Sin sincronizar</button>
+      <button class="filter-btn" data-filter="ok" onclick="setFilter('ok', this)">OK</button>
+      <input class="search-input" type="text" placeholder="Buscar proyecto..." oninput="setSearch(this.value)" />
+    </div>
   </div>
 
   <!-- Table -->
@@ -532,7 +538,7 @@
           <th class="sortable" onclick="setSort('name')">Proyecto <i class="sort-icon" id="si-name">↕</i></th>
           <th class="sortable" onclick="setSort('is_closed')">Estado <i class="sort-icon" id="si-is_closed">↕</i></th>
           <th class="sortable" onclick="setSort('created_at')">Creación <i class="sort-icon" id="si-created_at">↕</i></th>
-          <th class="sortable" onclick="setSort('attio_record_id')">Attio ID <i class="sort-icon" id="si-attio_record_id">↕</i></th>
+          <th class="sortable" onclick="setSort('attio_record_id')">Attio ONB ID <i class="sort-icon" id="si-attio_record_id">↕</i></th>
           <th class="sortable" onclick="setSort('has_webhook')">Webhook <i class="sort-icon" id="si-has_webhook">↕</i></th>
           <th class="sortable" onclick="setSort('last_sync')">Último sync <i class="sort-icon" id="si-last_sync">↕</i></th>
           <th class="sortable" onclick="setSort('status')">Sync status <i class="sort-icon" id="si-status">↕</i></th>
@@ -555,6 +561,7 @@
   let currentFilter = 'all';
   let currentWorkStatus = 'active';
   let currentSearch = '';
+  let currentCollection = 'all';
   let openRow = null;
   let currentSort = { col: null, dir: 'asc' };
 
@@ -616,6 +623,7 @@
 
       allProjects = data.projects || [];
       updateSummary(data.summary);
+      buildCollectionFilter();
       renderTable();
 
       const now = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -652,6 +660,26 @@
     renderTable();
   }
 
+  function setCollection(val) {
+    currentCollection = val;
+    document.querySelectorAll('.coll-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.coll === val);
+    });
+    renderTable();
+  }
+
+  function buildCollectionFilter() {
+    const portfolios = [...new Set(allProjects.map(p => p.portfolio))].sort();
+    const container = document.getElementById('collectionFilter');
+    if (!container) return;
+    container.innerHTML = [
+      `<button class="filter-btn coll-btn active" data-coll="all" onclick="setCollection('all')">Todos</button>`,
+      ...portfolios.map(t =>
+        `<button class="filter-btn coll-btn" data-coll="${escHtml(t)}" onclick="setCollection('${escHtml(t)}')">${escHtml(t)}</button>`
+      )
+    ].join('');
+  }
+
   function setSearch(q) {
     currentSearch = q.toLowerCase();
     renderTable();
@@ -663,11 +691,14 @@
 
     let projects = allProjects;
 
-    // Apply work-status filter
     if (currentWorkStatus === 'active') {
       projects = projects.filter(p => !p.is_closed);
     } else if (currentWorkStatus === 'closed') {
       projects = projects.filter(p => p.is_closed);
+    }
+
+    if (currentCollection !== 'all') {
+      projects = projects.filter(p => p.portfolio === currentCollection);
     }
 
     if (currentFilter !== 'all') {
@@ -805,8 +836,8 @@
         <h4>IDs del proyecto</h4>
         <div class="ids-form">
           <div class="field-group">
-            <label>Atom ID</label>
-            <input type="text" id="f-atom-${p.gid}" value="${escHtml(p.atom_id || '')}" placeholder="CjWHj789BDG2iZYDYhL1" />
+            <label>Atom ID ${p.atom_id_from_name ? '<span style="color:#f6ad55;font-size:9px;">· extraído del nombre</span>' : ''}</label>
+            <input type="text" id="f-atom-${p.gid}" value="${escHtml(p.atom_id || p.atom_id_from_name || '')}" placeholder="CjWHj789BDG2iZYDYhL1" />
           </div>
           <div class="field-group">
             <label>Attio Company ID</label>
