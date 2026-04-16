@@ -622,9 +622,8 @@
       if (!res.ok) throw new Error(data.error || 'Error desconocido');
 
       allProjects = data.projects || [];
-      updateSummary(data.summary);
       buildCollectionFilter();
-      renderTable();
+      renderTable();  // renderTable also calls updateSummary with filtered data
 
       const now = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
       document.getElementById('lastUpdated').textContent = `· Actualizado ${now}`;
@@ -636,14 +635,13 @@
     }
   }
 
-  function updateSummary(s) {
-    if (!s) return;
-    document.getElementById('s-total').textContent = s.total ?? 0;
-    document.getElementById('s-active').textContent = s.active ?? 0;
-    document.getElementById('s-closed').textContent = s.closed ?? 0;
-    document.getElementById('s-ok').textContent = s.ok ?? 0;
-    document.getElementById('s-failed').textContent = s.sync_failed ?? 0;
-    document.getElementById('s-noid').textContent = s.no_attio_id ?? 0;
+  function updateSummaryFromProjects(projects) {
+    document.getElementById('s-total').textContent = projects.length;
+    document.getElementById('s-active').textContent = projects.filter(p => !p.is_closed).length;
+    document.getElementById('s-closed').textContent = projects.filter(p => p.is_closed).length;
+    document.getElementById('s-ok').textContent = projects.filter(p => p.status === 'ok').length;
+    document.getElementById('s-failed').textContent = projects.filter(p => p.status === 'sync_failed').length;
+    document.getElementById('s-noid').textContent = projects.filter(p => p.status === 'no_attio_id').length;
   }
 
   function setFilter(f, el) {
@@ -704,6 +702,9 @@
     if (currentFilter !== 'all') {
       projects = projects.filter(p => p.status === currentFilter);
     }
+
+    // Update summary cards to reflect current filters (before search/sort)
+    updateSummaryFromProjects(projects);
 
     if (currentSearch) {
       projects = projects.filter(p =>

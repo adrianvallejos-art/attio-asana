@@ -1,10 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-const ONBOARDING_PORTFOLIO_GID = '1209745158203291';
-const ONBOARDING_TEAM_GID = '1204050191559311';   // fallback: team-only projects
+const ONBOARDING_TEAM_GID = '1204050191559311';
 const ATTIO_ONB_FIELD = 'Attio ONB ID';
 const PROJECT_OPT_FIELDS = 'name,gid,archived,completed,created_at,custom_fields.name,custom_fields.text_value,custom_fields.display_value,current_status.color,current_status.title';
-const PORTFOLIO_NAME = 'OB Customers';
+
+// All portfolios to query — { gid, name }
+const PORTFOLIOS = [
+  { gid: '1209745158203291', name: 'OB Customers' },
+  { gid: '1213027143201381', name: 'Clientes Solicitudes' },
+];
 
 /**
  * GET /api/dashboard-data
@@ -22,50 +26,55 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // ── 1. Fetch all projects from Portfolio (primary source) ──────
+  // ── 1. Fetch projects from all portfolios ─────────────────────
   const seenGids = new Set();
   let projects = [];
-  let nextPage = null;
 
-  do {
-    const url = nextPage
-      ? `https://app.asana.com/api/1.0${nextPage}`
-      : `https://app.asana.com/api/1.0/portfolios/${ONBOARDING_PORTFOLIO_GID}/items?opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
+  for (const portfolio of PORTFOLIOS) {
+    let nextPage = null;
+    do {
+      const url = nextPage
+        ? `https://app.asana.com/api/1.0${nextPage}`
+        : `https://app.asana.com/api/1.0/portfolios/${portfolio.gid}/items?opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
 
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return res.status(500).json({ error: `Asana portfolio fetch failed: ${r.status}` });
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) break;
 
-    const json = await r.json();
-    for (const item of json.data || []) {
-      if (!seenGids.has(item.gid)) {
-        seenGids.add(item.gid);
-        item._portfolio = PORTFOLIO_NAME;
-        projects.push(item);
+      const json = await r.json();
+      for (const item of json.data || []) {
+        if (!seenGids.has(item.gid)) {
+          seenGids.add(item.gid);
+          item._portfolio = portfolio.name;
+          projects.push(item);
+        }
+        // If already seen from another portfolio, keep first (priority order above)
       }
-    }
-    nextPage = json.next_page?.path || null;
-  } while (nextPage);
+      nextPage = json.next_page?.path || null;
+    } while (nextPage);
+  }
 
-  // ── 1b. Fallback: also fetch Onboarding team projects not in portfolio ──
-  nextPage = null;
-  do {
-    const url = nextPage
-      ? `https://app.asana.com/api/1.0${nextPage}`
-      : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
+  // ── 1b. Fallback: Onboarding team projects not in any portfolio ──
+  {
+    let nextPage = null;
+    do {
+      const url = nextPage
+        ? `https://app.asana.com/api/1.0${nextPage}`
+        : `https://app.asana.com/api/1.0/projects?team=${ONBOARDING_TEAM_GID}&opt_fields=${PROJECT_OPT_FIELDS}&limit=100`;
 
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) break;
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!r.ok) break;
 
-    const json = await r.json();
-    for (const item of json.data || []) {
-      if (!seenGids.has(item.gid)) {
-        seenGids.add(item.gid);
-        item._portfolio = 'Onboarding';
-        projects.push(item);
+      const json = await r.json();
+      for (const item of json.data || []) {
+        if (!seenGids.has(item.gid)) {
+          seenGids.add(item.gid);
+          item._portfolio = 'Onboarding';
+          projects.push(item);
+        }
       }
-    }
-    nextPage = json.next_page?.path || null;
-  } while (nextPage);
+      nextPage = json.next_page?.path || null;
+    } while (nextPage);
+  }
 
   // ── 2. Load Supabase state in bulk ─────────────────────────────
   const projectGids = projects.map((p) => p.gid);
