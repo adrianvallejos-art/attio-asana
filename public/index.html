@@ -288,26 +288,43 @@
     .history-item .err { color: #fc8181; font-size: 11px; margin-top: 3px; }
 
     /* Attio ID input inline */
-    .id-input-row {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-      margin-top: 8px;
+    /* IDs editable form */
+    .ids-form {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-top: 4px;
     }
 
-    .id-input-row input {
-      flex: 1;
+    .ids-form .field-group label {
+      display: block;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #4a5568;
+      margin-bottom: 5px;
+    }
+
+    .ids-form .field-group input {
+      width: 100%;
       background: #0f1117;
       border: 1px solid #3d4168;
       border-radius: 6px;
       color: #e2e8f0;
-      padding: 5px 10px;
-      font-size: 12px;
+      padding: 7px 10px;
+      font-size: 11px;
       font-family: monospace;
       outline: none;
     }
 
-    .id-input-row input:focus { border-color: #6c72e6; }
+    .ids-form .field-group input:focus { border-color: #6c72e6; }
+
+    .ids-form-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+    }
 
     /* Loading / empty */
     .loading, .empty {
@@ -706,21 +723,28 @@
         `).join('')
       : '<div style="color:#4a5568;font-size:12px;">Sin historial de sync</div>';
 
-    const noIdSection = !p.attio_record_id ? `
+    const idsSection = `
       <div class="detail-section" style="grid-column:1/-1;">
-        <h4>Completar Attio ONB ID</h4>
-        <p style="font-size:12px;color:#718096;margin-bottom:8px;">
-          Este proyecto no tiene el campo "Attio ONB ID" en Asana.
-          Puedes registrarlo manualmente aquí y se guardará en el mapping.
-        </p>
-        ${p.attio_company_id ? `<div class="detail-field" style="margin-bottom:6px;"><span class="key">Attio Company ID</span><span class="val">${p.attio_company_id}</span></div>` : ''}
-        ${p.atom_id ? `<div class="detail-field" style="margin-bottom:6px;"><span class="key">Atom ID</span><span class="val">${p.atom_id}</span></div>` : ''}
-        <div class="id-input-row">
-          <input type="text" id="input-${p.gid}" placeholder="Attio ONB ID  (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)" />
-          <button class="action-btn primary" onclick="saveManualMapping('${p.gid}')">Guardar y registrar webhook</button>
+        <h4>IDs del proyecto</h4>
+        <div class="ids-form">
+          <div class="field-group">
+            <label>Atom ID</label>
+            <input type="text" id="f-atom-${p.gid}" value="${escHtml(p.atom_id || '')}" placeholder="CjWHj789BDG2iZYDYhL1" />
+          </div>
+          <div class="field-group">
+            <label>Attio Company ID</label>
+            <input type="text" id="f-company-${p.gid}" value="${escHtml(p.attio_company_id || '')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+          <div class="field-group">
+            <label>Attio ONB ID</label>
+            <input type="text" id="f-onb-${p.gid}" value="${escHtml(p.attio_record_id || '')}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </div>
+        </div>
+        <div class="ids-form-footer">
+          <button class="action-btn primary" onclick="saveProjectIds('${p.gid}')">Guardar en Asana</button>
         </div>
       </div>
-    ` : '';
+    `;
 
     return `
       <div class="detail-inner">
@@ -728,19 +752,16 @@
           <h4>Información del proyecto</h4>
           <div class="detail-field"><span class="key">Asana GID</span><span class="val">${p.gid}</span></div>
           <div class="detail-field"><span class="key">Estado Asana</span><span class="val">${p.asana_status_title || (p.is_closed ? 'Cerrado' : 'Activo')}</span></div>
-          <div class="detail-field"><span class="key">Attio ONB ID</span><span class="val">${p.attio_record_id || '—'}</span></div>
-          <div class="detail-field"><span class="key">Attio Company ID</span><span class="val">${p.attio_company_id || '—'}</span></div>
-          <div class="detail-field"><span class="key">Atom ID</span><span class="val">${p.atom_id || '—'}</span></div>
           <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
           <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>
-          ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver en Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir ONB →</a></span></div>` : ''}
-          ${p.attio_company_id ? `<div class="detail-field"><span class="key">Ver Company</span><span class="val"><a href="https://app.attio.com/atomchat/companies/record/${p.attio_company_id}/overview" target="_blank" style="color:#6c72e6;">Abrir Company →</a></span></div>` : ''}
+          ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver ONB Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir →</a></span></div>` : ''}
+          ${p.attio_company_id ? `<div class="detail-field"><span class="key">Ver Company Attio</span><span class="val"><a href="https://app.attio.com/atomchat/companies/record/${p.attio_company_id}/overview" target="_blank" style="color:#6c72e6;">Abrir →</a></span></div>` : ''}
         </div>
         <div class="detail-section">
           <h4>Historial de sincronización</h4>
           ${historyHtml}
         </div>
-        ${noIdSection}
+        ${idsSection}
         ${p.attio_record_id ? `
         <div class="detail-section" style="grid-column:1/-1;">
           <h4 style="display:flex;justify-content:space-between;align-items:center;">
@@ -805,24 +826,44 @@
     }
   }
 
-  async function saveManualMapping(gid) {
-    const input = document.getElementById(`input-${gid}`);
-    const attioId = input?.value?.trim();
-    if (!attioId || !/^[0-9a-f-]{36}$/i.test(attioId)) {
-      showToast('UUID inválido — debe tener el formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', 'error');
+  async function saveProjectIds(gid) {
+    const project = allProjects.find(p => p.gid === gid);
+    if (!project) return;
+
+    const atomId   = document.getElementById(`f-atom-${gid}`)?.value?.trim() || null;
+    const companyId = document.getElementById(`f-company-${gid}`)?.value?.trim() || null;
+    const onbId    = document.getElementById(`f-onb-${gid}`)?.value?.trim() || null;
+
+    if (onbId && !/^[0-9a-f-]{36}$/i.test(onbId)) {
+      showToast('Attio ONB ID inválido — formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', 'error');
       return;
     }
-    showToast('Guardando mapping...', '');
+    if (companyId && !/^[0-9a-f-]{36}$/i.test(companyId)) {
+      showToast('Attio Company ID inválido — formato: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', 'error');
+      return;
+    }
+
+    showToast('Guardando en Asana...', '');
     try {
-      const res = await fetch('/api/register-webhook', {
+      const res = await fetch('/api/update-project-fields', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ asana_project_gid: gid, attio_record_id: attioId }),
+        body: JSON.stringify({
+          asana_project_gid: gid,
+          field_gids: project.field_gids || {},
+          atom_id: atomId,
+          attio_company_id: companyId,
+          attio_onb_id: onbId,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
-      showToast('Mapping guardado y webhook registrado ✓', 'success');
-      setTimeout(loadData, 1000);
+
+      let msg = 'Guardado en Asana ✓';
+      if (data.webhook_registered) msg += ' — webhook registrado';
+      else if (data.mapping_upserted) msg += ' — mapping actualizado';
+      showToast(msg, 'success');
+      setTimeout(loadData, 1200);
     } catch (e) {
       showToast('Error: ' + e.message, 'error');
     }

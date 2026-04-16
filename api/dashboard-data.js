@@ -94,6 +94,7 @@ export default async function handler(req, res) {
     const gid = project.gid;
 
     const cf = project.custom_fields || [];
+
     const attioField = cf.find((f) => f.name === ATTIO_ONB_FIELD);
     const attioRecordId = attioField?.text_value || attioField?.display_value || null;
     const isValidUuid = attioRecordId && /^[0-9a-f-]{36}$/i.test(attioRecordId);
@@ -103,6 +104,13 @@ export default async function handler(req, res) {
 
     const atomIdField = cf.find((f) => f.name === 'Atom ID');
     const atomId = atomIdField?.text_value || atomIdField?.display_value || null;
+
+    // Field GIDs needed to PATCH custom fields back to Asana
+    const fieldGids = {
+      attio_onb_id: attioField?.gid || null,
+      attio_company_id: attioCompanyField?.gid || null,
+      atom_id: atomIdField?.gid || null,
+    };
 
     const mapping = mappingByProject[gid] || null;
     const webhook = webhookByProject[gid] || null;
@@ -141,6 +149,7 @@ export default async function handler(req, res) {
       attio_id_raw: attioRecordId,
       attio_company_id: attioCompanyId,
       atom_id: atomId,
+      field_gids: fieldGids,
       has_mapping: !!mapping,
       has_webhook: !!webhook,
       webhook_gid: webhook?.webhook_gid || null,

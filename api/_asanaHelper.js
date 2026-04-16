@@ -95,6 +95,18 @@ export async function createTask(projectGid, { name, notes = '', due_on, assigne
 }
 
 /**
+ * Update custom field values on a project.
+ * @param {string} projectGid
+ * @param {Record<string, string>} fields  — { [fieldGid]: value }
+ */
+export async function updateProjectCustomFields(projectGid, fields) {
+  return asanaFetch(`/projects/${projectGid}`, {
+    method: 'PUT',
+    body: JSON.stringify({ data: { custom_fields: fields } }),
+  });
+}
+
+/**
  * Update a project's description.
  */
 export async function updateProjectDescription(projectGid, notes) {
