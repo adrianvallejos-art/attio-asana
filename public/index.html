@@ -136,28 +136,54 @@
       background: #141720;
       white-space: nowrap;
       overflow: hidden;
+      user-select: none;
     }
 
+    thead th.sortable {
+      cursor: pointer;
+    }
+
+    thead th.sortable:hover { color: #a0aec0; }
+    thead th.sort-asc, thead th.sort-desc { color: #e2e8f0; }
+
+    thead th .sort-icon { margin-left: 4px; opacity: .5; font-style: normal; }
+    thead th.sort-asc .sort-icon, thead th.sort-desc .sort-icon { opacity: 1; }
+
     /* Column widths */
-    thead th:nth-child(1) { width: 28%; }   /* Proyecto */
-    thead th:nth-child(2) { width: 8%; }    /* Asana (status) */
-    thead th:nth-child(3) { width: 10%; }   /* Fecha */
-    thead th:nth-child(4) { width: 13%; }   /* Attio ID */
-    thead th:nth-child(5) { width: 7%; }    /* Webhook */
-    thead th:nth-child(6) { width: 10%; }   /* Último sync */
-    thead th:nth-child(7) { width: 10%; }   /* Estado */
-    thead th:nth-child(8) { width: 14%; }   /* Acciones */
+    thead th:nth-child(1) { width: 5%; }    /* Expand */
+    thead th:nth-child(2) { width: 26%; }   /* Proyecto */
+    thead th:nth-child(3) { width: 9%; }    /* Estado */
+    thead th:nth-child(4) { width: 9%; }    /* Creación */
+    thead th:nth-child(5) { width: 13%; }   /* Attio ID */
+    thead th:nth-child(6) { width: 6%; }    /* Webhook */
+    thead th:nth-child(7) { width: 10%; }   /* Último sync */
+    thead th:nth-child(8) { width: 9%; }    /* Sync status */
+    thead th:nth-child(9) { width: 13%; }   /* Acciones */
 
     tbody tr {
       border-bottom: 1px solid #1e2235;
       transition: background .1s;
-      cursor: pointer;
     }
 
     tbody tr:last-child { border-bottom: none; }
     tbody tr:hover { background: #1e2235; }
 
     td { padding: 11px 12px; font-size: 12px; vertical-align: middle; overflow: hidden; }
+
+    /* Expand chevron */
+    .expand-btn {
+      background: none;
+      border: none;
+      color: #4a5568;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      transition: all .15s;
+      line-height: 1;
+    }
+    .expand-btn:hover { color: #e2e8f0; background: #2d3148; }
+    .expand-btn.open { color: #6c72e6; transform: rotate(180deg); }
 
     .project-name { font-weight: 500; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: block; }
     .project-name a {
@@ -502,18 +528,19 @@
     <table>
       <thead>
         <tr>
-          <th>Proyecto</th>
-          <th>Estado</th>
-          <th>Creación</th>
-          <th>Attio ID</th>
-          <th>Webhook</th>
-          <th>Último sync</th>
-          <th>Sync status</th>
+          <th></th>
+          <th class="sortable" onclick="setSort('name')">Proyecto <i class="sort-icon" id="si-name">↕</i></th>
+          <th class="sortable" onclick="setSort('is_closed')">Estado <i class="sort-icon" id="si-is_closed">↕</i></th>
+          <th class="sortable" onclick="setSort('created_at')">Creación <i class="sort-icon" id="si-created_at">↕</i></th>
+          <th class="sortable" onclick="setSort('attio_record_id')">Attio ID <i class="sort-icon" id="si-attio_record_id">↕</i></th>
+          <th class="sortable" onclick="setSort('has_webhook')">Webhook <i class="sort-icon" id="si-has_webhook">↕</i></th>
+          <th class="sortable" onclick="setSort('last_sync')">Último sync <i class="sort-icon" id="si-last_sync">↕</i></th>
+          <th class="sortable" onclick="setSort('status')">Sync status <i class="sort-icon" id="si-status">↕</i></th>
           <th>Acciones</th>
         </tr>
       </thead>
       <tbody id="tableBody">
-        <tr><td colspan="8"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
+        <tr><td colspan="9"><div class="loading"><div class="spinner"></div>Cargando proyectos...</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -526,9 +553,55 @@
   const API = '';  // same origin
   let allProjects = [];
   let currentFilter = 'all';
-  let currentWorkStatus = 'active';  // default: show only active projects
+  let currentWorkStatus = 'active';
   let currentSearch = '';
   let openRow = null;
+  let currentSort = { col: null, dir: 'asc' };
+
+  function setSort(col) {
+    if (currentSort.col === col) {
+      currentSort.dir = currentSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      currentSort = { col, dir: 'asc' };
+    }
+    // Update header indicators
+    document.querySelectorAll('thead th').forEach(th => {
+      th.classList.remove('sort-asc', 'sort-desc');
+    });
+    const icons = document.querySelectorAll('.sort-icon');
+    icons.forEach(i => i.textContent = '↕');
+    const icon = document.getElementById(`si-${col}`);
+    if (icon) {
+      icon.textContent = currentSort.dir === 'asc' ? '↑' : '↓';
+      icon.closest('th').classList.add(currentSort.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+    renderTable();
+  }
+
+  function sortProjects(projects) {
+    const { col, dir } = currentSort;
+    if (!col) return projects;
+    const mul = dir === 'asc' ? 1 : -1;
+    return [...projects].sort((a, b) => {
+      let va, vb;
+      if (col === 'last_sync') {
+        va = a.last_sync?.created_at || '';
+        vb = b.last_sync?.created_at || '';
+      } else if (col === 'has_webhook') {
+        va = a.has_webhook ? 1 : 0;
+        vb = b.has_webhook ? 1 : 0;
+      } else if (col === 'is_closed') {
+        va = a.is_closed ? 1 : 0;
+        vb = b.is_closed ? 1 : 0;
+      } else {
+        va = (a[col] || '').toString().toLowerCase();
+        vb = (b[col] || '').toString().toLowerCase();
+      }
+      if (va < vb) return -1 * mul;
+      if (va > vb) return  1 * mul;
+      return 0;
+    });
+  }
 
   async function loadData() {
     const btn = document.getElementById('refreshBtn');
@@ -608,8 +681,10 @@
       );
     }
 
+    projects = sortProjects(projects);
+
     if (projects.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9"><div class="empty">No hay proyectos para mostrar</div></td></tr>`;
       return;
     }
 
@@ -679,11 +754,13 @@
       : '—';
 
     return `
-      <tr onclick="toggleDetail('${p.gid}')" id="row-${p.gid}">
+      <tr id="row-${p.gid}">
+        <td style="text-align:center;padding:8px 4px;">
+          <button class="expand-btn" id="expand-${p.gid}" onclick="toggleDetail('${p.gid}')" title="Ver detalle">▼</button>
+        </td>
         <td>
           <span class="project-name">
-            ${asanaColor(p.asana_status_color)}
-            <a href="${asanaUrl}" target="_blank" onclick="event.stopPropagation()" title="${escHtml(p.name)}">${escHtml(p.name)}</a>
+            <a href="${asanaUrl}" target="_blank" title="${escHtml(p.name)}">${escHtml(p.name)}</a>
           </span>
         </td>
         <td>${closedBadge}</td>
@@ -692,10 +769,10 @@
         <td>${webhookCell}</td>
         <td>${lastSync}</td>
         <td>${statusBadge(p)}</td>
-        <td onclick="event.stopPropagation()">${actions}</td>
+        <td>${actions}</td>
       </tr>
       <tr id="detail-${p.gid}">
-        <td colspan="8" style="padding:0;">
+        <td colspan="9" style="padding:0;">
           <div class="detail-panel" id="panel-${p.gid}">
             ${renderDetail(p)}
           </div>
@@ -783,9 +860,13 @@
     if (openRow && openRow !== gid) {
       const prev = document.getElementById(`panel-${openRow}`);
       if (prev) prev.classList.remove('open');
+      const prevBtn = document.getElementById(`expand-${openRow}`);
+      if (prevBtn) prevBtn.classList.remove('open');
     }
 
     panel.classList.toggle('open');
+    const btn = document.getElementById(`expand-${gid}`);
+    if (btn) btn.classList.toggle('open', panel.classList.contains('open'));
     openRow = panel.classList.contains('open') ? gid : null;
   }
 
