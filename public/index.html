@@ -864,7 +864,7 @@
           <div class="detail-field"><span class="key">Webhook</span><span class="val">${p.webhook_gid || '—'}</span></div>
           <div class="detail-field"><span class="key">Mapping en BD</span><span class="val">${p.has_mapping ? 'Sí' : 'No'}</span></div>
           ${p.attio_record_id ? `<div class="detail-field"><span class="key">Ver ONB Attio</span><span class="val"><a href="${attioUrl}" target="_blank" style="color:#6c72e6;">Abrir →</a></span></div>` : ''}
-          ${p.attio_company_id ? `<div class="detail-field"><span class="key">Ver Company Attio</span><span class="val"><a href="https://app.attio.com/atomchat/companies/record/${p.attio_company_id}/overview" target="_blank" style="color:#6c72e6;">Abrir →</a></span></div>` : ''}
+          ${p.attio_company_id ? `<div class="detail-field"><span class="key">Ver Company Attio</span><span class="val"><a href="https://app.attio.com/atomchat/company/${p.attio_company_id}/onboardings" target="_blank" style="color:#6c72e6;">Abrir →</a></span></div>` : ''}
         </div>
         <div class="detail-section">
           <h4>Historial de sincronización</h4>
