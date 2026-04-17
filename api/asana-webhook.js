@@ -62,13 +62,17 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // Only trigger when someone publishes a project status update (the colored
-  // bubble with text). Asana fires resource_type='project_status', action='added'
-  // for this exact action. Everything else — task changes, project field edits,
-  // membership changes, comments — is ignored.
-  const relevantEvents = events.filter((e) =>
-    e.resource?.resource_type === 'project_status' && e.action === 'added'
-  );
+  // Only trigger on project status updates. Two event shapes arrive depending
+  // on how the webhook was registered:
+  //   A) resource_type='project_status', action='added'  — new webhooks with explicit filter
+  //   B) resource_type='project', action='changed', change.field='current_status' — legacy filter
+  // Task events and all other project changes are intentionally ignored.
+  const relevantEvents = events.filter((e) => {
+    if (e.resource?.resource_type === 'project_status' && e.action === 'added') return true;
+    if (e.resource?.resource_type === 'project' && e.action === 'changed' &&
+        e.change?.field === 'current_status') return true;
+    return false;
+  });
 
   if (relevantEvents.length === 0) {
     return res.status(200).json({ message: 'No relevant events' });
