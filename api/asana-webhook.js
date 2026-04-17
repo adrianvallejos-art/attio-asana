@@ -143,25 +143,37 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── 4. Trigger async processing ─────────────────────────────────
+  // ── 4. Process sync events synchronously before responding ──────
+  // Fire-and-forget is unreliable on Vercel: the function shuts down after
+  // sending the response, killing any background fetch. We await each sync
+  // call here so Vercel keeps the function alive until the note is created.
+  // Total processing time is typically <3s, well within Asana's timeout.
+  const results = [];
   if (inserted.length > 0) {
     const protocol = req.headers['x-forwarded-proto'] || 'https';
     const host = req.headers['x-forwarded-host'] || req.headers.host;
     const origin = process.env.APP_URL || `${protocol}://${host}`;
 
     for (const eventId of inserted) {
-      fetch(`${origin}/api/onboarding-sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sync_event_id: eventId }),
-      }).catch((e) => console.warn('[asana-webhook] Async trigger failed:', e.message));
+      try {
+        const r = await fetch(`${origin}/api/onboarding-sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sync_event_id: eventId }),
+        });
+        const result = await r.json().catch(() => ({}));
+        results.push({ id: eventId, ok: r.ok, note_created: result.note_created });
+      } catch (e) {
+        console.warn('[asana-webhook] Sync call failed:', e.message);
+        results.push({ id: eventId, ok: false, error: e.message });
+      }
     }
   }
 
   return res.status(200).json({
     success: true,
     events_received: events.length,
-    events_queued: inserted.length,
+    events_processed: results,
   });
 }
 
