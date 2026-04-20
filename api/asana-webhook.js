@@ -62,32 +62,20 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // Only trigger on project status updates. Two event shapes arrive depending
-  // on how the webhook was registered:
-  //   A) resource_type='project_status', action='added'  — new webhooks with explicit filter
-  //   B) resource_type='project', action='changed', change.field='current_status' — legacy filter
-  // Task events and all other project changes are intentionally ignored.
-  const relevantEvents = events.filter((e) => {
-    if (e.resource?.resource_type === 'project_status' && e.action === 'added') return true;
-    if (e.resource?.resource_type === 'project' && e.action === 'changed' &&
-        e.change?.field === 'current_status') return true;
-    return false;
-  });
-
-  if (relevantEvents.length === 0) {
-    return res.status(200).json({ message: 'No relevant events' });
-  }
-
-  // Group by project GID — ensures only ONE sync per project per webhook call
-  // even if both project_status and project events arrive in the same batch.
+  // Filtering is handled at the Asana side via webhook filters (project_status+added).
+  // We only need to extract the project GID from each event and deduplicate.
+  // project_status events: parent.gid = project GID
+  // project changed events (legacy): resource.gid = project GID
   const byProject = {};
-  for (const event of relevantEvents) {
-    // project_status events: parent.gid = project, resource.gid = status entry
-    // project changed events: resource.gid = project
+  for (const event of events) {
     const projectGid = event.parent?.gid || event.resource?.gid;
     if (!projectGid) continue;
     if (!byProject[projectGid]) byProject[projectGid] = [];
     byProject[projectGid].push(event);
+  }
+
+  if (Object.keys(byProject).length === 0) {
+    return res.status(200).json({ message: 'No events with project GID' });
   }
 
   const inserted = [];
