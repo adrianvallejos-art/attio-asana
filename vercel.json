@@ -2,9 +2,6 @@
   "version": 2,
   "functions": {
     "api/*.js": {
-      "maxDuration": 30
-    },
-    "api/daily-reconcile.js": {
       "maxDuration": 60
     }
   },
