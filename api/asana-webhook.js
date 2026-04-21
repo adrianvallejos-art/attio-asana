@@ -63,15 +63,18 @@ export default async function handler(req, res) {
   const supabase = getSupabase();
 
   // Filtering is handled at the Asana side via webhook filters (project_status+added).
-  // We only need to extract the project GID from each event and deduplicate.
-  // project_status events: parent.gid = project GID
-  // project changed events (legacy): resource.gid = project GID
+  // Group by project GID and track the status GID for deduplication.
+  // project_status events: parent.gid = project, resource.gid = status entry
   const byProject = {};
   for (const event of events) {
     const projectGid = event.parent?.gid || event.resource?.gid;
     if (!projectGid) continue;
-    if (!byProject[projectGid]) byProject[projectGid] = [];
-    byProject[projectGid].push(event);
+    if (!byProject[projectGid]) byProject[projectGid] = { events: [], statusGid: null };
+    byProject[projectGid].events.push(event);
+    // Capture the project_status GID for dedup
+    if (event.resource?.resource_type === 'project_status' && event.resource?.gid) {
+      byProject[projectGid].statusGid = event.resource.gid;
+    }
   }
 
   if (Object.keys(byProject).length === 0) {
@@ -80,7 +83,7 @@ export default async function handler(req, res) {
 
   const inserted = [];
 
-  for (const [projectGid, projectEvents] of Object.entries(byProject)) {
+  for (const [projectGid, { events: projectEvents, statusGid }] of Object.entries(byProject)) {
     // ── 3a. Look up mapping in Supabase (fast path) ───────────────
     let attioRecordId = null;
 
@@ -124,12 +127,18 @@ export default async function handler(req, res) {
       event_type: eventType,
       asana_project_gid: projectGid,
       attio_record_id: attioRecordId,
+      asana_status_gid: statusGid || null,
       payload: { events: projectEvents },
       status: 'pending',
     }).select('id');
 
     if (error) {
-      console.error(`[asana-webhook] DB insert error for ${projectGid}:`, error.message);
+      // Unique constraint on asana_status_gid = already queued/processed, skip silently
+      if (error.code === '23505') {
+        console.log(`[asana-webhook] Status ${statusGid} for ${projectGid} already processed — skipping`);
+      } else {
+        console.error(`[asana-webhook] DB insert error for ${projectGid}:`, error.message);
+      }
     } else {
       inserted.push(data[0]?.id);
     }
