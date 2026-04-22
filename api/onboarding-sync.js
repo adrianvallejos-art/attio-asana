@@ -68,13 +68,9 @@ export default async function handler(req, res) {
     }
 
     // ── 4. Build the note content ───────────────────────────────
-    const asanaEvents = payload?.events || [];
     const noteContent = buildNoteContent({
       projectName,
-      eventType: event_type,
-      asanaEvents,
       statusUpdates,
-      projectDetails,
     });
 
     // ── 5. Create Note in Attio ─────────────────────────────────
@@ -99,7 +95,7 @@ export default async function handler(req, res) {
     }
 
     // ── 6. Auto-detect property updates ─────────────────────────
-    const propertyUpdates = detectPropertyUpdates(asanaEvents, projectDetails);
+    const propertyUpdates = detectPropertyUpdates(projectDetails);
     if (Object.keys(propertyUpdates).length > 0) {
       try {
         await patchAttioRecord(ONBOARDING_SLUG, attio_record_id, propertyUpdates);
@@ -234,52 +230,22 @@ function chunkArray(arr, size) {
 
 // ─── Note builder ────────────────────────────────────────────────────────────
 
-function buildNoteContent({ projectName, eventType, asanaEvents, statusUpdates, projectDetails }) {
+function buildNoteContent({ projectName, statusUpdates }) {
+  if (statusUpdates.length === 0) {
+    return `Proyecto: ${projectName}\n\n(Sin status update disponible)`;
+  }
+
+  const update = statusUpdates[0];
   const lines = [];
-  const now = new Date().toISOString().split('T')[0];
 
-  lines.push(`Fecha: ${now}`);
-  lines.push(`Proyecto: ${projectName}`);
-  lines.push(`Tipo de evento: ${formatEventType(eventType)}`);
+  if (update.title) lines.push(`📌 ${update.title}`);
+  if (update.color) lines.push(`Estado: ${formatStatusColor(update.color)}`);
+  if (update.author?.name) lines.push(`Por: ${update.author.name}`);
+  if (update.created_at) lines.push(`Fecha: ${update.created_at.split('T')[0]}`);
   lines.push('');
-
-  if (statusUpdates.length > 0) {
-    const latest = statusUpdates[0];
-    lines.push('── Último status update ──');
-    if (latest.title) lines.push(`Título: ${latest.title}`);
-    if (latest.color) lines.push(`Estado: ${formatStatusColor(latest.color)}`);
-    lines.push('');
-    if (latest.text) lines.push(latest.text);
-    lines.push('');
-  }
-
-  if (asanaEvents.length > 0) {
-    lines.push('── Cambios detectados ──');
-    for (const evt of asanaEvents) {
-      const resource = evt.resource?.resource_type || 'recurso';
-      const action = evt.action || 'cambio';
-      const name = evt.resource?.name || '';
-      lines.push(`• ${resource} ${action}${name ? `: ${name}` : ''}`);
-    }
-    lines.push('');
-  }
-
-  if (projectDetails?.current_status) {
-    lines.push('── Estado actual del proyecto ──');
-    lines.push(`Color: ${formatStatusColor(projectDetails.current_status.color)}`);
-  }
+  if (update.text) lines.push(update.text);
 
   return lines.join('\n');
-}
-
-function formatEventType(type) {
-  const map = {
-    project_update: 'Actualización de proyecto',
-    task_completed: 'Tarea completada',
-    task_added: 'Tarea agregada',
-    call_logged: 'Llamada registrada',
-  };
-  return map[type] || type;
 }
 
 function formatStatusColor(color) {
@@ -293,7 +259,7 @@ function formatStatusColor(color) {
   return map[color] || color;
 }
 
-function detectPropertyUpdates(_asanaEvents, projectDetails) {
+function detectPropertyUpdates(projectDetails) {
   const updates = {};
   if (!projectDetails) return updates;
   if (projectDetails.current_status?.color === 'complete') {

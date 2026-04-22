@@ -63,7 +63,7 @@ export async function getProjectCustomField(projectGid, fieldName) {
  * Get status updates (project updates) for a project.
  */
 export async function getProjectStatusUpdates(projectGid, { limit = 10 } = {}) {
-  return asanaFetch(`/projects/${projectGid}/project_statuses?opt_fields=title,text,color,author,created_at&limit=${limit}`);
+  return asanaFetch(`/projects/${projectGid}/project_statuses?opt_fields=gid,title,text,color,author.name,created_at&limit=${limit}`);
 }
 
 /**

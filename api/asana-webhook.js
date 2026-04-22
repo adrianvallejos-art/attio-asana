@@ -62,17 +62,24 @@ export default async function handler(req, res) {
 
   const supabase = getSupabase();
 
-  // Filtering is handled at the Asana side via webhook filters (project_status+added).
-  // Group by project GID and track the status GID for deduplication.
-  // project_status events: parent.gid = project, resource.gid = status entry
+  // Accept ONLY project_status+added events. Asana filters at webhook level,
+  // but we enforce here too to guard against legacy webhooks or replays.
+  const statusEvents = events.filter(
+    (e) => e.resource?.resource_type === 'project_status' && e.action === 'added'
+  );
+
+  if (statusEvents.length === 0) {
+    return res.status(200).json({ message: 'No project_status events' });
+  }
+
+  // Group by project GID (parent.gid for project_status events)
   const byProject = {};
-  for (const event of events) {
-    const projectGid = event.parent?.gid || event.resource?.gid;
+  for (const event of statusEvents) {
+    const projectGid = event.parent?.gid;
     if (!projectGid) continue;
-    if (!byProject[projectGid]) byProject[projectGid] = { events: [], statusGid: null };
-    byProject[projectGid].events.push(event);
-    // Capture the project_status GID for dedup
-    if (event.resource?.resource_type === 'project_status' && event.resource?.gid) {
+    if (!byProject[projectGid]) byProject[projectGid] = { statusGid: null };
+    // Use the first status GID seen for this project
+    if (!byProject[projectGid].statusGid && event.resource?.gid) {
       byProject[projectGid].statusGid = event.resource.gid;
     }
   }
@@ -83,7 +90,7 @@ export default async function handler(req, res) {
 
   const inserted = [];
 
-  for (const [projectGid, { events: projectEvents, statusGid }] of Object.entries(byProject)) {
+  for (const [projectGid, { statusGid }] of Object.entries(byProject)) {
     // ── 3a. Look up mapping in Supabase (fast path) ───────────────
     let attioRecordId = null;
 
@@ -128,7 +135,7 @@ export default async function handler(req, res) {
       asana_project_gid: projectGid,
       attio_record_id: attioRecordId,
       asana_status_gid: statusGid || null,
-      payload: { events: projectEvents },
+      payload: { status_gid: statusGid },
       status: 'pending',
     }).select('id');
 
