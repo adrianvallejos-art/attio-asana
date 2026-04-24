@@ -80,10 +80,22 @@ export async function deleteAttioNote(noteId) {
  * Query Attio records by attribute filter.
  * Returns the data array (may be empty).
  */
-export async function queryAttioRecords(objectSlug, filter) {
+/**
+ * Query Attio records by a single attribute filter.
+ * Attio v2 filter format:
+ *   { attribute: { slug }, condition, value }
+ */
+export async function queryAttioRecords(objectSlug, { slug, condition = 'equals', value }) {
   const json = await attioFetch(`/objects/${objectSlug}/records/query`, {
     method: 'POST',
-    body: JSON.stringify({ filter, limit: 10 }),
+    body: JSON.stringify({
+      filter: {
+        attribute: { slug },
+        condition,
+        value,
+      },
+      limit: 10,
+    }),
   });
   return json.data || [];
 }

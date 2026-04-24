@@ -91,14 +91,9 @@ export default async function handler(req, res) {
     // ── 2. Search Attio Company by atom_id ───────────────────────
     try {
       const records = await queryAttioRecords('companies', {
-        filters: [
-          {
-            attribute: { slug: 'atom_id' },
-            condition: 'equals',
-            value: { text: atomIdFromName },
-          },
-        ],
-        operator: 'and',
+        slug: 'atom_id',
+        condition: 'equals',
+        value: atomIdFromName,
       });
 
       if (records.length > 0) {
