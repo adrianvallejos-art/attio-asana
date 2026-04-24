@@ -82,18 +82,14 @@ export async function deleteAttioNote(noteId) {
  */
 /**
  * Query Attio records by a single attribute filter.
- * Attio v2 filter format:
- *   { attribute: { slug }, condition, value }
+ * Attio v2 uses the attribute slug as the key directly:
+ *   { filter: { [slug]: { "$eq": value } } }
  */
-export async function queryAttioRecords(objectSlug, { slug, condition = 'equals', value }) {
+export async function queryAttioRecords(objectSlug, { slug, value }) {
   const json = await attioFetch(`/objects/${objectSlug}/records/query`, {
     method: 'POST',
     body: JSON.stringify({
-      filter: {
-        attribute: { slug },
-        condition,
-        value,
-      },
+      filter: { [slug]: { $eq: value } },
       limit: 10,
     }),
   });

@@ -92,7 +92,6 @@ export default async function handler(req, res) {
     try {
       const records = await queryAttioRecords('companies', {
         slug: 'atom_id',
-        condition: 'equals',
         value: atomIdFromName,
       });
 
