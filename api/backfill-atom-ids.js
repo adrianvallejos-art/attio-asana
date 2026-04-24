@@ -22,11 +22,13 @@ export default async function handler(req, res) {
   const token = process.env.ASANA_ACCESS_TOKEN;
   if (!token) return res.status(500).json({ error: 'ASANA_ACCESS_TOKEN not set' });
 
-  const { force = false, dry_run = false } = req.body || {};
+  const { force = false, dry_run = false, offset = 0, limit = 20 } = req.body || {};
 
   const projects = await fetchPortfolioProjects(token, PORTFOLIO_GID);
 
   // ── Pre-filter: solo proyectos con Atom ID en el nombre y campo vacío ──
+  // Paginate candidates (offset/limit apply after pre-filtering)
+  const allCandidates = [];
   const candidates = [];
   let no_atom_in_name = 0;
   let already_filled = 0;
@@ -45,9 +47,12 @@ export default async function handler(req, res) {
     if (currentAtomId && !force) { already_filled++; continue; }
     if (!atomIdField?.gid) continue;
 
-    candidates.push({ project, atomIdFromName, atomIdField, attioCompanyField,
+    allCandidates.push({ project, atomIdFromName, atomIdField, attioCompanyField,
                       currentCompanyId: attioCompanyField?.text_value || attioCompanyField?.display_value || null });
   }
+
+  // Apply pagination to candidates
+  candidates.push(...allCandidates.slice(offset, offset + limit));
 
   // ── Process candidates in parallel batches ────────────────────────
   const detail = [];
@@ -99,11 +104,19 @@ export default async function handler(req, res) {
     }
   }
 
+  const totalCandidates = allCandidates.length;
+  const hasMore = offset + limit < totalCandidates;
+
   return res.status(200).json({
     success: true,
     dry_run,
     force,
     total: projects.length,
+    total_candidates: totalCandidates,
+    offset,
+    limit,
+    has_more: hasMore,
+    next_offset: hasMore ? offset + limit : null,
     no_atom_in_name,
     already_filled,
     atom_id_written,
