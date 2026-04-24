@@ -146,3 +146,109 @@ export async function deleteWebhook(webhookGid) {
   });
   return res.ok;
 }
+
+/**
+ * Duplicate a project from a template.
+ * Returns the Asana Job object — poll with pollJob() to get the new project GID.
+ */
+export async function duplicateProject(templateGid, { name, teamGid, startOn, dueOn }) {
+  return asanaFetch(`/projects/${templateGid}/duplicate`, {
+    method: 'POST',
+    body: JSON.stringify({
+      data: {
+        name,
+        team: teamGid,
+        include: [
+          'members', 'notes', 'task_notes', 'task_assignee', 'subtasks',
+          'task_attachments', 'task_dates', 'task_dependencies',
+          'task_followers', 'task_tags', 'task_projects',
+        ],
+        schedule_dates: {
+          should_skip_weekends: false,
+          start_on: startOn,
+          due_on: dueOn,
+        },
+      },
+    }),
+  });
+}
+
+/**
+ * Poll an Asana Job until it completes.
+ * Returns the job data (includes new_project.gid when status = 'succeeded').
+ */
+export async function pollJob(jobGid, { maxAttempts = 20, intervalMs = 2000 } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const job = await asanaFetch(`/jobs/${jobGid}`);
+    if (job.status === 'succeeded') return job;
+    if (job.status === 'failed') throw new Error(`Asana job ${jobGid} failed`);
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Asana job ${jobGid} timed out after ${maxAttempts} attempts`);
+}
+
+/**
+ * Add a project to a portfolio.
+ */
+export async function addProjectToPortfolio(portfolioGid, projectGid) {
+  return asanaFetch(`/portfolios/${portfolioGid}/addItem`, {
+    method: 'POST',
+    body: JSON.stringify({ data: { item: projectGid } }),
+  });
+}
+
+/**
+ * Create a new portfolio.
+ */
+export async function createPortfolio(name, workspaceGid) {
+  return asanaFetch('/portfolios', {
+    method: 'POST',
+    body: JSON.stringify({
+      data: { name, workspace: workspaceGid, color: 'light-blue', public: false },
+    }),
+  });
+}
+
+/**
+ * Update a project (name, public, start_on, due_on, owner, etc.)
+ */
+export async function updateProject(projectGid, data) {
+  return asanaFetch(`/projects/${projectGid}`, {
+    method: 'PUT',
+    body: JSON.stringify({ data }),
+  });
+}
+
+/**
+ * Get all tasks in a project with their custom fields and names.
+ */
+export async function getProjectTasks(projectGid) {
+  return asanaFetch(
+    `/projects/${projectGid}/tasks?opt_fields=gid,name,notes,custom_fields.gid,custom_fields.name,custom_fields.text_value&limit=100`
+  );
+}
+
+/**
+ * Update a task.
+ */
+export async function updateTask(taskGid, data) {
+  return asanaFetch(`/tasks/${taskGid}`, {
+    method: 'PUT',
+    body: JSON.stringify({ data }),
+  });
+}
+
+/**
+ * Find an Asana user by email. Returns the user GID or null.
+ */
+export async function getUserByEmail(email, workspaceGid) {
+  try {
+    const users = await asanaFetch(
+      `/users?workspace=${workspaceGid}&opt_fields=gid,email&limit=100`
+    );
+    const match = users.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+    return match?.gid || null;
+  } catch {
+    return null;
+  }
+}

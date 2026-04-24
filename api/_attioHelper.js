@@ -77,6 +77,35 @@ export async function deleteAttioNote(noteId) {
 }
 
 /**
+ * Query Attio records by attribute filter.
+ * Returns the data array (may be empty).
+ */
+export async function queryAttioRecords(objectSlug, filter) {
+  const json = await attioFetch(`/objects/${objectSlug}/records/query`, {
+    method: 'POST',
+    body: JSON.stringify({ filter, limit: 10 }),
+  });
+  return json.data || [];
+}
+
+/**
+ * Get records associated with a given record via a specific attribute.
+ * Used to traverse record-reference attributes (e.g. Company linked to an Onboarding).
+ * Returns the raw Attio record objects from the referenced records.
+ */
+export async function getAttioAssociation(objectSlug, recordId, attributeSlug) {
+  const record = await getAttioRecord(objectSlug, recordId);
+  const values = record?.data?.values || {};
+  const refs = values[attributeSlug];
+  if (!refs || refs.length === 0) return [];
+
+  // Each ref is a record-reference entry: { target_object, target_record_id }
+  return refs
+    .filter((r) => r.target_record_id)
+    .map((r) => ({ object: r.target_object, record_id: r.target_record_id }));
+}
+
+/**
  * Create a Note on an Attio record.
  *
  * @param {string} parentRecordId   — The Attio record ID to attach the note to
