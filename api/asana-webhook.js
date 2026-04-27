@@ -203,7 +203,7 @@ async function getAttioIdFromAsana(projectGid) {
 
     const json = await res.json();
     const field = json.data?.custom_fields?.find((f) => f.name === ATTIO_ONB_FIELD);
-    const value = field?.text_value || field?.display_value || null;
+    const value = (field?.text_value || field?.display_value || '').trim() || null;
 
     // Validate it looks like a UUID
     if (value && /^[0-9a-f-]{36}$/i.test(value)) return value;

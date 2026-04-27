@@ -108,14 +108,14 @@ export default async function handler(req, res) {
     const cf = project.custom_fields || [];
 
     const attioField = cf.find((f) => f.name === ATTIO_ONB_FIELD);
-    const attioRecordId = attioField?.text_value || attioField?.display_value || null;
+    const attioRecordId = (attioField?.text_value || attioField?.display_value || '').trim() || null;
     const isValidUuid = attioRecordId && /^[0-9a-f-]{36}$/i.test(attioRecordId);
 
     const attioCompanyField = cf.find((f) => f.name === 'Attio Company ID');
-    const attioCompanyId = attioCompanyField?.text_value || attioCompanyField?.display_value || null;
+    const attioCompanyId = (attioCompanyField?.text_value || attioCompanyField?.display_value || '').trim() || null;
 
     const atomIdField = cf.find((f) => f.name === 'Atom ID');
-    const atomId = atomIdField?.text_value || atomIdField?.display_value || null;
+    const atomId = (atomIdField?.text_value || atomIdField?.display_value || '').trim() || null;
 
     // Auto-extract Atom ID from project name: "Company (AtomID)" → "AtomID"
     const nameMatch = project.name?.match(/\(([^)]+)\)\s*$/);
