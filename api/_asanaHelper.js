@@ -128,7 +128,6 @@ export async function createWebhook(projectGid, targetUrl) {
         target: targetUrl,
         filters: [
           { resource_type: 'project_status', action: 'added' },
-          { resource_type: 'project', action: 'changed' },
         ],
       },
     }),

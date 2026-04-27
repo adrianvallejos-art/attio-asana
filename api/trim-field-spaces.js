@@ -74,9 +74,14 @@ export default async function handler(req, res) {
 
   for (let i = 0; i < page.length; i += CONCURRENCY) {
     const batch = page.slice(i, i + CONCURRENCY);
-    const results = await Promise.all(batch.map((c) => processCandidate(c, dry_run, supabase, req, token)));
+    const settled = await Promise.allSettled(
+      batch.map((c) => processCandidate(c, dry_run, supabase, req, token))
+    );
 
-    for (const r of results) {
+    for (const s of settled) {
+      const r = s.status === 'fulfilled'
+        ? s.value
+        : { project: '?', error: s.reason?.message || String(s.reason), fields_trimmed: 0 };
       detail.push(r);
       if (r.error) errors++;
       else {
@@ -105,6 +110,14 @@ export default async function handler(req, res) {
 }
 
 async function processCandidate({ project, dirty, trimmedOnbId }, dry_run, supabase, req, token) {
+  try {
+    return await _processCandidate({ project, dirty, trimmedOnbId }, dry_run, supabase, req, token);
+  } catch (e) {
+    return { project: project?.name, gid: project?.gid, error: e.message, fields_trimmed: 0 };
+  }
+}
+
+async function _processCandidate({ project, dirty, trimmedOnbId }, dry_run, supabase, req, token) {
   const row = {
     project: project.name,
     gid: project.gid,
