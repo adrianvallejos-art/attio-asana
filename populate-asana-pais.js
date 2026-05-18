@@ -28,28 +28,28 @@ const CLIENTES_GID          = '1213481895234783';
 const ATTIO_COMPANY_ID_GID  = '1213632895496591';  // custom field en cada portfolio
 const PAIS_FIELD_GID        = '1209758683683903';  // campo "País" en portfolio Clientes
 
-// Attio primary_location.country_name → Asana enum option GID
-// Países sin opción en Asana (Cuba, Uruguay, Venezuela, Portugal) quedan sin mapeo → campo vacío
+// Attio primary_location.country_code (ISO 3166-1 alpha-2) → Asana enum option GID
+// Países sin opción en Asana (CU, UY, VE, PT) quedan sin mapeo → campo vacío
 const COUNTRY_MAP = {
-  'Argentina':       '1209758683683904',
-  'Bolivia':         '1209758683683905',
-  'Brasil':          '1211547799949368',
-  'Chile':           '1209758683683906',
-  'Colombia':        '1209758683683907',
-  'Costa Rica':      '1209758683683908',
-  'Ecuador':         '1209758683683909',
-  'El Salvador':     '1209758683683910',
-  'España':          '1209758683683911',
-  'Guatemala':       '1209758683683912',
-  'Honduras':        '1209758683683913',
-  'México':          '1209758683683914',
-  'Nicaragua':       '1209758683683915',
-  'Panamá':          '1209758683683916',
-  'Paraguay':        '1210357909165044',
-  'Perú':            '1209758683683917',
-  'Rep. Dominicana': '1209758683683918',
-  'Estados Unidos':  '1210562925996320',
-  'Puerto Rico':     '1211761946953782',
+  'AR': '1209758683683904',  // Argentina
+  'BO': '1209758683683905',  // Bolivia
+  'BR': '1211547799949368',  // Brasil
+  'CL': '1209758683683906',  // Chile
+  'CO': '1209758683683907',  // Colombia
+  'CR': '1209758683683908',  // Costa Rica
+  'EC': '1209758683683909',  // Ecuador
+  'SV': '1209758683683910',  // El Salvador
+  'ES': '1209758683683911',  // España
+  'GT': '1209758683683912',  // Guatemala
+  'HN': '1209758683683913',  // Honduras
+  'MX': '1209758683683914',  // México
+  'NI': '1209758683683915',  // Nicaragua
+  'PA': '1209758683683916',  // Panamá
+  'PY': '1210357909165044',  // Paraguay
+  'PE': '1209758683683917',  // Perú
+  'DO': '1209758683683918',  // Rep. Dominicana
+  'US': '1210562925996320',  // Estados Unidos
+  'PR': '1211761946953782',  // Puerto Rico
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ async function attioGetCompany(recordId) {
   if (!res.ok) return null;
   const json = await res.json();
   const loc = json?.data?.values?.primary_location?.[0];
-  return loc?.country_name ?? null;
+  return loc?.country_code ?? null;
 }
 
 function cfText(item, fieldGid) {
@@ -132,7 +132,7 @@ for (const batch of chunk(toProcess, 5)) {
       const countryName = await attioGetCompany(attioId);
 
       if (!countryName) {
-        console.log(`  ⚠  ${name}: sin primary_location.country_name en Attio`);
+        console.log(`  ⚠  ${name}: sin primary_location en Attio`);
         skippedNoCountry++;
         return;
       }
