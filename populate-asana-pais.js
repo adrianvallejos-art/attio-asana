@@ -17,10 +17,10 @@
 
 const DRY_RUN     = process.argv.includes('--dry-run');
 const ASANA_TOKEN = process.env.ASANA_ACCESS_TOKEN;
-const ATTIO_TOKEN = process.env.ATTIO_API_KEY || process.env.VITE_ATTIO_API_TOKEN;
+const ATTIO_TOKEN = process.env.ATTIO_API_KEY || process.env.VITE_ATTIO_API_TOKEN || process.env.ATTIO_API_TOKEN;
 
 if (!ASANA_TOKEN) throw new Error('Falta ASANA_ACCESS_TOKEN en .env.local');
-if (!ATTIO_TOKEN) throw new Error('Falta ATTIO_API_KEY (o VITE_ATTIO_API_TOKEN) en .env.local');
+if (!ATTIO_TOKEN) throw new Error('Falta ATTIO_API_KEY / ATTIO_API_TOKEN en .env.local');
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 
