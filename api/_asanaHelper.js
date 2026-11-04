@@ -269,16 +269,45 @@ export async function getPortfolioItems(portfolioGid, optFields = 'name,resource
  * Attio Company ID custom field value. No live single-lookup endpoint exists
  * for this in Asana — list all items of CLIENTES_GID and filter in memory,
  * same approach as update-clientes-portfolio.js.
+ *
+ * Caso "1 suscripción, múltiples ambientes" (ej. Ilumno: una sola cuenta en
+ * Attio/facturación, pero varios sub-portafolios de Asana — uno por
+ * universidad/ambiente — cada uno con su propio Atom ID/Attio Company ID,
+ * viviendo DENTRO del portafolio padre "Ilumno", no como hijo directo de
+ * "Clientes"). Si no hay match directo, se baja un nivel más dentro de cada
+ * sub-portafolio de "Clientes" buscando el ambiente específico. Esto solo se
+ * dispara cuando falla el camino rápido (match directo), así que el costo
+ * extra de N llamadas solo aplica al crear/buscar un proyecto para un
+ * ambiente que todavía no se encontró — no es un escaneo permanente.
  */
 export async function findClientPortfolio(clientesPortfolioGid, { atomId, attioCompanyId }, fieldGids) {
   const items = await getPortfolioItems(clientesPortfolioGid);
   const cfVal = (item, fieldGid) => (item.custom_fields || []).find((f) => f.gid === fieldGid)?.text_value?.trim() || null;
-  return items.find((it) => {
+  const matches = (it) => {
     if (it.resource_type !== 'portfolio') return false;
     if (atomId && cfVal(it, fieldGids.atom_id) === atomId) return true;
     if (attioCompanyId && cfVal(it, fieldGids.attio_company_id) === attioCompanyId) return true;
     return false;
-  }) || null;
+  };
+
+  const direct = items.find(matches);
+  if (direct) return direct;
+
+  const parentPortfolios = items.filter((it) => it.resource_type === 'portfolio');
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < parentPortfolios.length; i += BATCH_SIZE) {
+    const batch = parentPortfolios.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((parent) => getPortfolioItems(parent.gid))
+    );
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const nested = result.value.find(matches);
+      if (nested) return nested;
+    }
+  }
+
+  return null;
 }
 
 /**

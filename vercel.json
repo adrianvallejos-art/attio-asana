@@ -11,8 +11,8 @@
       "schedule": "0 8 * * *"
     },
     {
-      "path": "/api/meta-waba-sync",
-      "schedule": "0 9 * * *"
+      "path": "/api/daily-portfolio-reconcile",
+      "schedule": "0 7 * * *"
     }
   ],
   "rewrites": [
