@@ -7,6 +7,7 @@ import {
   renameSection,
   createSection,
   createTask,
+  updateProject,
   updateProjectCustomFields,
   resolveOrCreateEnumOptionGids,
   createWebhook,
@@ -21,6 +22,7 @@ import {
   getProjectTasksWithStatus,
   waitForCustomFieldSettings,
   moveTaskToSectionPosition,
+  getUserByEmail,
 } from './_asanaHelper.js';
 
 export const config = { api: { bodyParser: true } };
@@ -113,7 +115,7 @@ async function handleStatusUpdates(req, res) {
  */
 async function handleCreate(req, res) {
   const body = req.body || {};
-  const { atomId, companyRecordId, companyName, attioCompanyUrl, projectLabel, iniciativas, baselineUrl, sowUrl } = body;
+  const { atomId, companyRecordId, companyName, attioCompanyUrl, projectLabel, iniciativas, baselineUrl, sowUrl, csmEmail, onboardingEmail } = body;
 
   if (!companyRecordId || !projectLabel || !Array.isArray(iniciativas) || iniciativas.length === 0) {
     return res.status(400).json({ error: 'companyRecordId, projectLabel e iniciativas (≥1) son requeridos' });
@@ -129,6 +131,34 @@ async function handleCreate(req, res) {
     const newProjectGid = completedJob.new_project?.gid;
     if (!newProjectGid) throw new Error('Asana no devolvió el nuevo proyecto (job sin new_project)');
     const newProjectUrl = `https://app.asana.com/0/${newProjectGid}`;
+
+    // 1b. Owner del proyecto — por default Asana lo deja como el usuario del
+    // ASANA_ACCESS_TOKEN (Adrián), sin importar quién lo creó desde csm-audit.
+    // Pedido explícito 2026-11-05: CSM de la cuenta → si no tiene usuario en
+    // este workspace, ONB → si tampoco, se queda en el default (Adrián). Se
+    // dispara acá (no bloqueante, en paralelo con secciones/tareas de abajo)
+    // y se espera recién antes de responder — getUserByEmail/updateProject
+    // son 1-3 llamadas livianas, no vale la pena bloquear el resto por esto.
+    const ownerPromise = (async () => {
+      try {
+        let ownerGid = csmEmail ? await getUserByEmail(csmEmail, CSM_PROJECT.workspace_gid) : null;
+        if (!ownerGid && onboardingEmail) ownerGid = await getUserByEmail(onboardingEmail, CSM_PROJECT.workspace_gid);
+        if (ownerGid) await updateProject(newProjectGid, { owner: ownerGid });
+      } catch (e) {
+        console.warn('[csm-project] No se pudo asignar el owner (no bloqueante):', e.message);
+      }
+    })();
+
+    // 1c. Resuelve "Iniciativa" en paralelo con secciones/tareas de abajo —
+    // no depende de newProjectGid, solo del nombre del campo y las
+    // iniciativas que mandó csm-audit. Se usa en los pasos 5 y 6. Movido
+    // acá (antes estaba como paso 4, bloqueando en serie) — pedido explícito
+    // 2026-11-05 (demora del wizard).
+    const fields = CSM_PROJECT.fields;
+    const iniciativaNames = iniciativas.flatMap((i) => [i.name, ...(i.mergedNames || [])]).filter(Boolean);
+    const iniciativaGidsPromise = iniciativaNames.length > 0
+      ? resolveOrCreateEnumOptionGids(fields.iniciativa, iniciativaNames)
+      : Promise.resolve([]);
 
     // 2. Secciones por iniciativa — la primera renombra el placeholder
     //    ("3. Implementación <iniciativas>", conserva el número original de
@@ -161,13 +191,16 @@ async function handleCreate(req, res) {
     //    plantilla ya trae "Tickets" y el hito "Salida a producción" — se
     //    reordenan después de crear las tareas custom: Tickets justo después
     //    de la primera, el hito al final de todas. Pedido explícito 2026-10-13.
+    // Las tareas de una misma iniciativa no dependen entre sí — se crean en
+    // paralelo (Promise.all conserva el orden del array de entrada, aunque
+    // Asana las termine en otro orden) para no pagar una ida y vuelta por
+    // tarea. Pedido explícito 2026-11-05 (demora del wizard).
     for (let i = 0; i < iniciativas.length; i++) {
       const tasks = iniciativas[i].tasks || [];
-      const createdTaskGids = [];
-      for (const t of tasks) {
-        const created = await createTask(newProjectGid, { name: t.name, notes: t.notes || '', sectionGid: sectionGidByIniciativa[i] });
-        createdTaskGids.push(created.gid);
-      }
+      const created = await Promise.all(
+        tasks.map((t) => createTask(newProjectGid, { name: t.name, notes: t.notes || '', sectionGid: sectionGidByIniciativa[i] })),
+      );
+      const createdTaskGids = created.map((c) => c.gid);
       if (i === 0 && placeholder && createdTaskGids.length > 0) {
         try {
           const existing = await getProjectTasks(newProjectGid);
@@ -203,16 +236,11 @@ async function handleCreate(req, res) {
       }
     }
 
-    // 4. Resuelve "Iniciativa" ANTES de tocar portfolio/proyecto — se usa en
-    //    los dos. Incluye también las "absorbidas" dentro de otra sección
-    //    (ej. WhatsApp Flows dentro de Cortex, ver mergedNames en csm-audit)
-    //    para que sigan apareciendo en el campo aunque no tengan su propia
-    //    sección.
-    const fields = CSM_PROJECT.fields;
-    const iniciativaNames = iniciativas.flatMap((i) => [i.name, ...(i.mergedNames || [])]).filter(Boolean);
-    const iniciativaGids = iniciativaNames.length > 0
-      ? await resolveOrCreateEnumOptionGids(fields.iniciativa, iniciativaNames)
-      : [];
+    // 4. "Iniciativa" ya se venía resolviendo en paralelo desde el paso 1c
+    //    (incluye también las "absorbidas" dentro de otra sección, ej.
+    //    WhatsApp Flows dentro de Cortex — ver mergedNames en csm-audit) —
+    //    acá solo se espera, ya debería estar lista o casi.
+    const iniciativaGids = await iniciativaGidsPromise;
 
     // 5. Ubicar el proyecto dentro de la carpeta (sub-portfolio) del cliente
     //    en el portfolio "Clientes" — si no existe todavía, se crea con la
@@ -301,6 +329,26 @@ async function handleCreate(req, res) {
       console.warn('[csm-project] No se pudo ubicar el proyecto en el portfolio del cliente (no bloqueante):', e.message);
     }
 
+    // 7/8. Webhook de seguimiento + mapping en Supabase — no dependen de los
+    // custom fields del paso 6 (la espera de hasta 30s de abajo), así que se
+    // disparan ANTES y corren en paralelo con esa espera en vez de pagarla
+    // aparte. Pedido explícito 2026-11-05 (demora del wizard).
+    const protocol = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const origin = process.env.APP_URL || `${protocol}://${host}`;
+    const webhookPromise = createWebhook(newProjectGid, `${origin}/api/asana-webhook`)
+      .catch((e) => console.warn('[csm-project] Webhook registration failed (non-blocking):', e.message));
+    const supabase = getSupabase();
+    const mappingPromise = supabase.from('onboarding_mapping').upsert({
+      attio_record_id: companyRecordId,
+      asana_project_gid: newProjectGid,
+      team: 'csm_project',
+      project_label: projectLabel,
+      active: true,
+    }, { onConflict: 'asana_project_gid' }).then(({ error }) => {
+      if (error) console.warn('[csm-project] Mapping insert failed (non-blocking):', error.message);
+    });
+
     // 6. Custom fields a nivel proyecto — SOLO identificadores (Atom ID,
     //    Attio Company ID, URL Attio, Iniciativa). Ciclo de vida, Plan
     //    contratado, Industria, País y Total MRR viven a nivel del portfolio
@@ -321,28 +369,7 @@ async function handleCreate(req, res) {
       else await updateProjectCustomFields(newProjectGid, customFieldValues);
     }
 
-    // 7. Webhook de seguimiento — reusa api/asana-webhook.js, ya genérico
-    //    (filtra por project_status "added" y resuelve el mapping por team).
-    const protocol = req.headers['x-forwarded-proto'] || 'https';
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
-    const origin = process.env.APP_URL || `${protocol}://${host}`;
-    try {
-      await createWebhook(newProjectGid, `${origin}/api/asana-webhook`);
-    } catch (e) {
-      console.warn('[csm-project] Webhook registration failed (non-blocking):', e.message);
-    }
-
-    // 8. Mapping para que onboarding-sync.js sepa que este proyecto es
-    //    'csm_project' y cuál es su hilo conductor.
-    const supabase = getSupabase();
-    const { error: mapErr } = await supabase.from('onboarding_mapping').upsert({
-      attio_record_id: companyRecordId,
-      asana_project_gid: newProjectGid,
-      team: 'csm_project',
-      project_label: projectLabel,
-      active: true,
-    }, { onConflict: 'asana_project_gid' });
-    if (mapErr) console.warn('[csm-project] Mapping insert failed (non-blocking):', mapErr.message);
+    await Promise.all([webhookPromise, mappingPromise, ownerPromise]);
 
     return res.status(200).json({
       success: true,
