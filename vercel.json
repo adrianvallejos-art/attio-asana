@@ -9,6 +9,10 @@
     {
       "path": "/api/daily-reconcile",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/daily-portfolio-reconcile",
+      "schedule": "0 7 * * *"
     }
   ],
   "rewrites": [
